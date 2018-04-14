@@ -2,10 +2,10 @@
 
   This program has several functions:
 
-    1- Evaluate the completeness of the gene space in a whole genome sequencing dataset that has not been assembled.
-    2- Reconstruct the gene/CDS/protein associated with the hits of the Gene Space reference.
-    3- Evaluate the duplication level of the analyzed Gene Space.
-    4- Estimate the genome coverage and heterozygosity based in the reconstruction of the evaluation Gene Space set.
+   1. Evaluate the completeness of the gene space in a whole genome sequencing dataset that has not been assembled.
+   2. Reconstruct the gene/CDS/protein associated with the hits of the Gene Space reference.
+   3. Evaluate the duplication level of the analyzed Gene Space.
+   4. Estimate the genome coverage and heterozygosity based in the reconstruction of the evaluation Gene Space set.
 
   We define the gene space as the gene population in the genome of a specific
   individual or accession. So, for example, the gene space for the Arabidopsis
@@ -26,10 +26,8 @@
 
   The script uses two mandatory parameters:
 
-    1- Reference protein sequence file (-r)
-    2- A list of fastq short read files to map to the reference (-i). 
-       Multiple files can be specified using the comma. The script DOES 
-       NOT USE the pair end information
+   1. Reference protein sequence file (-r)
+   2. A list of fastq short read files to map to the reference (-i). Multiple files can be specified using the comma. The script DOES NOT USE the pair end information
 
   Prerrequisites
   ==============
@@ -87,9 +85,9 @@
    * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
    * Bowtie2: -w <bowtie2_arguments> (e.g. -w '--very-fast')
 
-   Note1: Threading options will be overwritten by -t <threads>
-   Note2: Imput/Output/Formating options are banned.
-   Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to recompile the tool using make k=64
+   - Note1: Threading options will be overwritten by -t <threads>
+   - Note2: Imput/Output/Formating options are banned.
+   - Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to recompile the tool using make k=64
 
   Completeness Evaluation
   =======================
