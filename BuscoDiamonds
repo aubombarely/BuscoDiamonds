@@ -1,0 +1,3007 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+ BuscoDiamonds
+ Pipeline to evaluate/rebuild the GeneSpace in non assembled Illumina reads
+
+=cut
+
+our $version = '0.1.1';
+
+=head1 SYPNOSIS
+
+ BuscoDiamonds [-h] -r <fasta_reference> -i <fastq_input_files> -o <outputdir>
+                    [-f <hits_filters>] [-t <threads>]
+                    [-l <grouplength_std>]
+                    [-m <minia_arguments>]
+                    [-e <mapsembler_arguments>]
+                    [-w <bowtie2_arguments>]
+                    [-a <assembly_rounds>]   
+                    [-b <busco_lineage_dir>]
+                    [-V]
+
+=head2 I<Flags:>
+
+=over
+
+
+=item -r
+
+B<fasta_reference>        Fasta file with the reference proteins (mandatory)
+
+=item -i
+
+B<fastq_input_files>      Fastq files separated by commas (mandatory) 
+
+=item -o
+
+B<output_dir>             Output directory (mandatory)
+
+=item -f
+
+B<hits_filter>            Filter for Diamond hits as tag1=val1,tag2=val2...
+
+=item -t
+
+B<num_threads>            Number of threads to run Diamond (default: all)
+
+=item -l
+
+B<group_length_std>       Tabular file with the group length STD (default:10%)
+
+=item -m
+
+B<minia_arguments>        Minia arguments as argument=value separated by commas
+
+=item -a
+
+B<assembly_rounds>        Assembly rounds (default:1)
+
+=item -e
+
+B<mapssebler_arguments>   Mapsembler2 arguments as extremities:args;extend:args
+
+=item -w
+
+B<bowtie2_arguments>      Bowtie2 arguments as argument=value separated by commas
+
+=item -b
+
+B<busco_lineage_dir>      Directory with the BUSCO lineage
+
+=item -V
+
+B<be_verbose>             Be verbose and print the parsing status.
+
+=item -v
+
+B<version>                Print version
+
+=item -h
+
+B<help>                   Print the help
+
+=back
+
+=cut
+
+=head1 DESCRIPTION
+
+  This program has several functions:
+    1- Evaluate the completeness of the gene space in a whole genome 
+       sequencing dataset that has not been assembled.
+    2- Reconstruct the gene/CDS/protein associated with the hits of the
+       Gene Space reference.
+    3- Evaluate the duplication level of the analyzed Gene Space.
+    4- Estimate the genome coverage and heterozygosity based in the 
+       reconstruction of the evaluation Gene Space set.
+
+  We define the gene space as the gene population in the genome of a specific
+  individual or accession. So, for example, the gene space for the Arabidopsis
+  thaliana Col. genome (annotation TAIR10) is composed by 27,416 genes.
+
+  A gene space representative is serie of proteins that could be found in most
+  of the species of a specific clade. So for example, if all the Brassicaceae
+  species shared the same 8,000 genes, a gene space representaive for the
+  Brassicaeae clade will have an ancestor single copy ortholog of those genes.
+  You can find more information about the ortholog datasets at Zdobnov et al.
+  2017 (OrthoDB v9.1) and Waterhouse et al. 2017 (BUSCO3).  
+  
+  This scripts uses DIAMOND (Buchfink et al. 2015) to align unassembled short
+  reads against a BUSCO/OrthoDB dataset to evaluate the completness of the
+  genome before the assembly, but at the same time re-construct the genes, 
+  CDS and proteins to retrieve more information (e.g. heterozygosity, coverage
+  ...).
+
+  The script uses two mandatory parameters:
+    1- Reference protein sequence file (-r)
+    2- A list of fastq short read files to map to the reference (-i). 
+       Multiple files can be specified using the comma. The script DOES 
+       NOT USE the pair end information
+
+  Prerrequisites
+  ==============
+   * Bioperl
+   * Diamond accessible from the path or as the env. variable DIAMOND_PATH
+   * Seqtk accessible from the path or as the env. variable SEQTK_PATH
+   * Minia accessible from the path or as the env. variable MINIA_PATH
+   * Bowtie2 accessible from the path or as the env. variable BOWTIE2_PATH
+   * Mapsembler2 accessible from the path or as the env. variable MAPSEMBLER_PATH
+   * Augustus accessible from the path or as the env. variable AUGUSTUS_PATH
+     Additionally the the Augustus config directory should be accessible as the
+     environmental variable AUGUSTUS_CONFIG_PATH
+   * Samtools accessible from the path or as the env. variable SAMTOOLS_PATH
+   * Bedtools accessible from the path or as the env. variable BEDTOOLS_PATH 
+   * Freebayes accessible from the path or as the env. variable FREEBAYES_PATH
+
+  Steps
+  =====
+     +---- 
+     | 1.1- Create the DIAMOND database.
+     | 1.2- Align the reads against the DIAMOND database.
+   1x| 1.3- Filter the DIAMOND output if a filter was specified
+     | 1.4- Estimate the completeness of the REF_GENE_SPACE based in the mapping
+     | 1.5- Select of the Fastq reads that were mapped to the reference
+     +-----
+     +-----
+     | 2.1- Run Minia assembler on the Fastq reads
+   Rx| 2.2- Extend the Minia contigs with Mapsembler2
+     | 2.3- Mapping the whole read dataset back to the extended contigs
+     | 2.4- Extract the reads from the mapping
+     +-----
+   1x| 2.5- Reassemble the fastq reads with Minia
+     +-----  
+     +-----
+     | 3.1- Split contigs in separate files
+   1x| 3.2- Run Augustus in a multithread mode
+     | 3.3- Parse the Augustus output to get CDS and protein sequences
+     +-----
+     +-----
+     | 4.1- Evaluate the completness in the assembly (final contigs) with BUSCO
+     | 4.2- Evaluate the completness in the predicted proteins with BUSCO
+   1x| 4.3- Reads remapping with the assembly
+     | 4.4- Remapping file sorting and indexing
+     | 4.5- Coverage analysis using Bedtools
+     | 4.6- Variant calling usinf Freebayes to evaluate heterozygosity
+     +-----
+     Note1: The number of assembly rounds (R) will be defined by the parameter
+           -a <assembly rounds>
+   
+  Arguments for External Tools
+  ============================
+  BuscoDiamonds can pass some arguments to some tools such as:
+     * Minia: -m <minia_arguments> (e.g. -m '-abundance-min=5')
+     * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
+     * Bowtie2: -w <bowtie2_arguments> (e.g. -w '--very-fast')
+       Note1: Threading options will be overwritten by -t <threads>
+       Note2: Imput/Output/Formating options are banned.
+       Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to 
+              recompile the tool using make k=64
+
+  Completeness Evaluation
+  =======================
+  BuscoDiamonds evaluates the completeness of the reference Gene Space using two
+  different approaches:
+
+     A- Analyzing the reads that align with the protein model (e.g. BUSCO protein)
+        and calculating if they cover the length (+/- SD) of the protein model
+        at the step 1.5. 
+        
+        Because the assembly has not been performed yet, it will only estimate
+        if the protein is represented in a "complete" or in a "fragmented" form.
+        Option -l <std_length_file> controls the SD values for the protein models.
+        If no option -l is supplied, it will use 10% of the protein length. No 
+        expected score is used, but the Diamond hits can be filtered prior this 
+        analysis with the -f option (e.g. -f 'ZI=60' to keep 60% of similarity 
+        or more).
+
+     B- BUSCO run over the assembled contigs (step 2.5) using the BUSCO mode 
+        'genome' and over the predicted proteins (step 3.4) using the 'protein'
+        mode. This option is only available with -b <BUSCO_lineage> option is 
+        supplied.
+
+
+
+  Examples of running commands
+  # Basic command
+   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
+                 -o MySp_BuscoDiamonds2018 -l BuscoPlantProtein_lengths_cutoff
+
+  # Filtering the hits with percentage of similarity below 60%
+   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
+                 -o MySp_BuscoDiamonds2018 -f ZI=60
+
+  
+
+=cut
+
+=head1 AUTHORS
+
+  Aureliano Bombarely Gomez.
+  (aurebg@vt.edu).
+
+=cut
+
+=head1 METHODS
+
+ BuscoDiamonds
+
+
+=cut
+
+use strict;
+use warnings;
+use autodie;
+
+use Getopt::Std;
+use File::Spec;
+use File::Basename;
+use File::Copy;
+use File::Path qw(make_path remove_tree);
+use IPC::Cmd qw[can_run run];
+use threads;
+
+use Bio::SeqIO;
+use Bio::AlignIO;
+use Bio::Seq;
+use Bio::SimpleAlign;
+
+use Math::BigFloat;
+use List::Util;
+
+our ($opt_r, $opt_i, $opt_o, $opt_f, $opt_t, $opt_l, $opt_m, $opt_a,
+     $opt_e, $opt_w, $opt_b, $opt_V, $opt_v, $opt_h);
+getopts("r:i:o:f:t:l:m:a:e:w:b:Vvh");
+if (!$opt_r && !$opt_i && !$opt_o && !$opt_f && !$opt_t && !$opt_l
+    && !$opt_m && !$opt_a && !$opt_e && !$opt_w && !$opt_b && 
+    !$opt_V && !$opt_v && !$opt_h) {
+    print "There are n\'t any tags. Print help\n\n";
+    help();
+}
+if ($opt_h) {
+    help();
+}
+elsif ($opt_v) {
+    print STDERR "\nBuscoDiamonds version:$version\n";
+    print STDERR "Developed at the Bombarely Laboratory (2018-02-18)\n\n";
+    exit(1);
+}
+
+my $date = `date`;
+chomp($date);
+print STDERR "\n\n############################################################";
+print STDERR "\n## BuscoDiamonds Starts ($date) ##\n";
+print STDERR "############################################################\n\n";
+
+print_header("0) Checking arguments");
+
+##############################################################################
+## CHECK ARGUMENTS
+##############################################################################
+
+## Get the arguments and check them
+
+my $fastaref = $opt_r || 
+    die("\nINPUT ARG. ERROR: -r <reference> argument was not supplied.\n\n");
+
+print STDERR "\tPEP_REFSET file: $fastaref\n";
+
+## Count how many sequences has the fasta file
+my $fastaref_count = `grep -c '>' $fastaref`;
+chomp($fastaref_count); 
+print STDERR "\tPEP_REFSET has $fastaref_count sequences\n";
+
+## Get the input sequences
+
+my $inputfiles = $opt_i ||
+     die("\nINPUT ARG. ERROR: -i <input_files> argument was not supplied.\n\n");
+
+my @fqlist = ();
+my $total_input_reads = 0;
+print STDERR "\n\tFastq input files:\n";
+foreach my $fqfile (split(/,/, $opt_i)) {
+
+    unless (-e $fqfile) {
+
+	die("\n\tERROR: $fqfile fastq file does not exist.\n");
+    } 
+    else {
+
+	#my $count_at = `seqtk seq -A $fqfile | grep -c "^>"`;
+	my $count_at = 0;
+	chomp($count_at); 
+	$total_input_reads += $count_at;
+
+	print STDERR "\t\t$fqfile\t($count_at reads)\n";
+	push(@fqlist, $fqfile); 
+    }
+}
+print STDERR "\tTotal input reads: $total_input_reads\n\n";
+    
+my $outdir = $opt_o ||
+    die("\nINPUT ARG. ERROR: -o <output_dir> argument was not supplied.\n\n");
+
+print STDERR "\tOutput directory: $outdir\n";
+
+unless (-d $outdir) {
+
+    die("\nERROR: Out directory does not exist. Please create it.\n\n");
+}
+    
+my $dmdfilterline = $opt_f; 
+
+## DIAMOND permited tags
+## AS: bitScore, 
+## ZR: rawScore, 
+## ZE: expected, 
+## ZI: percent identity, 
+## ZL: reference length, 
+## ZF: frame, 
+## ZS: query start DNA coordinate
+
+my %perm_dmdtags = (
+    'AS' => 1, 
+    'ZR' => 1, 
+    'ZE' => 1, 
+    'ZI' => 1, 
+    'ZL' => 1, 
+    'ZF' => 1, 
+    'ZS' => 1,
+    ); 
+
+my %dmdfilter = ();
+if ($dmdfilterline) {
+    foreach my $dmd (split(/,/, $dmdfilterline)) {
+
+	if ($dmd =~ m/^(.+)=(.+)$/) {
+	    
+	    unless (exists $perm_dmdtags{$1}) {
+	 
+		die("\n\tERROR: filter tag $1 is not a valid tag.\n");
+	    }
+	    else {
+
+		$dmdfilter{$1} = $2;
+		print STDERR "\tFilter $1 activated with a value of $2\n";
+	    }
+	}
+    }
+}
+
+
+my $threads = $opt_t || 1;
+if ($threads !~ m/^\d+$/) {
+
+    die("\nINPUT ARG. ERROR: -t <threads> argument is not an integer.\n\n"); 
+}
+print STDERR "\tThreads: $threads\n";
+
+## The estimation of then completeness of the hits is based in the reference
+## length +/- and std deviation based in these group. The std can be supplied
+## by a file (-l <std_file>) or by default will calculate the 10%
+
+my %grouplen_std = ();
+if ($opt_l) {
+
+    unless (-e $opt_l) {
+    
+	die("\n\tERROR: -l $opt_l file does not exists.\n"); 
+    }
+    else {
+	
+	print STDERR "\tGroup lengths STD file: $opt_l\n";
+	open my $gls_fh, '<', $opt_l;
+	while(<$gls_fh>) {
+	
+	    chomp($_); 
+	    my @line = split(/\t/, $_);
+	    $grouplen_std{$line[0]} = { length => $line[3], std => $line[2]};
+	}
+	
+	my $gls_c = scalar(keys(%grouplen_std));
+	print STDERR "\t$gls_c lengths and std have been parsed.\n";
+    }
+}
+else {
+
+    print STDERR "\tNo group lengths file has been supplied.\n";
+    print STDERR "\tUsing default sequence length 10%\n";
+
+    my $seqio = Bio::SeqIO->new( -file => $fastaref, -format => 'Fasta'); 
+    while( my $seqobj = $seqio->next_seq()) {
+    
+	my $seqid = $seqobj->id();
+	my $seqlen = $seqobj->length();
+	
+	## Estimate the 10%
+	my $def10p = $seqlen/10;
+	$grouplen_std{$seqid} = { length => $seqlen, std => $def10p };	
+    }
+}
+
+
+
+## Check the executables
+
+my %exec_list = (
+    DIAMOND_PATH    => ['diamond'],
+    SEQTK_PATH      => ['seqtk'],
+    MINIA_PATH      => ['minia'],
+    BOWTIE2_PATH    => ['bowtie2-build', 'bowtie2'],
+    MAPSEMBLER_PATH => ['mapsembler2_extend', 'mapsembler2_extremities'],
+    AUGUSTUS_PATH   => ['augustus'],
+    SAMTOOLS_PATH   => ['samtools'],
+    BEDTOOLS_PATH   => ['bedtools'],
+    FREEBAYES_PATH  => ['freebayes']
+    ); 
+
+## Add the run_BUSCO.py executable if the option -b is used
+
+if ($opt_b) {
+    
+    $exec_list{BUSCO_PATH} = ['run_BUSCO.py'];
+}
+
+my %exepath = ();
+
+foreach my $exec_key (sort keys %exec_list) {
+
+    my @execitems = @{$exec_list{$exec_key}};
+    foreach my $e_item (@execitems) {
+
+	if (exists $ENV{$exec_key}) {
+    
+	    print STDERR "\t$exec_key PATH defined for $e_item executable\n";
+	    $exepath{$e_item} = File::Spec->catfile($ENV{$exec_key}, $e_item);
+	}
+	else {
+    
+	    my $exe_path = can_run($e_item);
+	    if ($exe_path) {
+		
+		$exepath{$e_item} = $exe_path;
+		print STDERR "\t$e_item is available in the PATH ($exe_path)\n";
+	    }
+	    else {
+		
+		print STDERR "\nERROR: $e_item executable ($exec_key package)";
+		die(" is not accessible.\n");
+	    }	   
+	}	
+    }
+}
+
+## check that AUGUSTUS_CONFIG_PATH env. variable has been set up
+unless (exists $ENV{'AUGUSTUS_CONFIG_PATH'}) {
+
+    die("ERROR: AUGUSTUS_CONFIG_PATH variable has not been set up.\n"); 
+}
+
+
+## Check the minia arguments
+
+my %minia_args = get_minia_args(\%exepath);
+
+## Add the number of threads
+
+$minia_args{'-nb-cores'} = $threads;
+
+unless ($minia_args{'-kmer-size'}) {
+
+    $minia_args{'-kmer-size'} = 63;
+}
+
+print STDERR "\n\tMinia assembly arguments:\n";
+foreach my $marg (sort(keys(%minia_args))) {
+
+    print STDERR "\t\t$marg\t$minia_args{$marg}\n";
+}
+
+## Check the mapsembler arguments
+
+my %mapbler_args = get_mapbler_args(\%exepath, $opt_e);
+
+## Add the number of threads
+
+$mapbler_args{'extremities'}->{'-nb-cores'} = $threads;
+
+## NOTE: Mapsembler2 (as Minia) is compiled for a max. k of 31
+## to be able to run higher Kmers, you will need to recompile these
+## programs with make e.g. k=63
+
+unless ($mapbler_args{'extremities'}->{'--k'}) {
+
+    $mapbler_args{'extremities'}->{'--k'} = 31;
+}
+
+unless ($mapbler_args{'extend'}->{'-k'}) {
+
+    $mapbler_args{'extend'}->{'-k'} = 31;
+}
+
+print STDERR "\n\tMapsembler assembly arguments:\n";
+foreach my $marb (sort(keys(%mapbler_args))) {
+
+    foreach my $marb2 (sort(keys(%{$mapbler_args{$marb}}))) {
+	print STDERR "\t\t$marb\t$marb2\t$mapbler_args{$marb}->{$marb2}\n";
+    }
+}
+
+## Check the Bowtie arguments
+
+my %bwt_args = get_bowtie_args(\%exepath, $opt_w);
+
+## Add the number of threads
+
+$bwt_args{'--threads'} = $threads;
+
+print STDERR "\n\tBowtie mapping arguments:\n";
+foreach my $barg (sort(keys(%bwt_args))) {
+
+    print STDERR "\t\t$barg\t$bwt_args{$barg}\n";
+}
+
+
+## Get the rounds of scaffolding
+
+my $assembly_rounds = $opt_a || 1;
+if ($assembly_rounds !~ m/^(\d+)$/) {
+
+    die("\n\tERROR: -a <assembly_rounds> is not an integer.\n");
+}
+print STDERR "\n\tRounds of Assembly:\t$assembly_rounds\n";
+
+my $buscolineage = '';
+if ($opt_b) {
+
+    $buscolineage = $opt_b;
+    unless (-d $buscolineage) {
+    
+	die("\n\tERROR: -l <busco_lineage_directory> does not exist.\n");
+    }
+    else {
+    
+	print STDERR "\n\tBUSCO evaluation ENABLED\n";
+	print STDERR "\tBUSCO lineage directory: $buscolineage\n";
+    }
+}
+else {
+
+    print STDERR "\n\tBUSCO evaluation DISABLED (use -b to enable this option)\n";
+}
+
+
+
+
+
+
+##############################################################################
+## Reduce the complexity by mapping
+##############################################################################
+
+
+## First run the mapping
+
+print_header("1) Running Diamond");
+
+print_subheader("1.1- Creating the Diamond reference database.");
+
+## Generate the db
+## First, create a directory
+
+my $d00dir = dmd_mkdir($outdir, "00_DiamondReference");
+
+## get the basename for the fasta file
+my @fastarefparsed = fileparse($fastaref, qr/\.[^.]*/); 
+my $refbase = $fastarefparsed[0];
+my $dbbase =  File::Spec->catfile($d00dir, $refbase);
+
+## The expected name is
+my $dbname = $dbbase . ".dmnd";
+
+## Check if the database exists and if it does not, run makedb
+
+if (-e $dbname) {
+
+    print STDERR "\tDiamond db found ($dbname).\n\tSkipping diamond makedb\n";
+}
+else {
+
+    ## run diamond makedb
+    create_diamond_db($fastaref, $dbbase);
+}
+
+print_subheader("1.2- Running Diamond");
+
+## Run diamond to get a sam file
+
+my $d01dir = dmd_mkdir($outdir, "01_DiamondMapping");
+
+## Check if diamond has been run
+
+my $outsam = File::Spec->catfile($d01dir, "DiamondMapping.sam");
+
+if (-e $outsam) {
+
+    print STDERR "\tSam file found ($outsam).\n\tSkipping diamond mapping\n";
+}
+else {
+
+    ## run diamond
+    run_diamond($dbname, \@fqlist, $outsam); 
+}
+
+## Check how many hits were found before any filtering
+
+my %hits_c = ();
+my %reads_c = ();
+my $total_hits = 0;
+
+open my $rawhits_fh, '<', $outsam;
+while(<$rawhits_fh>) {
+
+    chomp($_);
+    unless ($_ =~ /^@/) {
+    
+	my @line = split(/\t/, $_);
+	$hits_c{$line[2]}++;
+	$reads_c{$line[0]}++;
+	$total_hits++;
+    }
+}
+close($rawhits_fh); 
+
+my $hits_count = scalar(keys(%hits_c));
+my $reads_count = scalar(keys(%reads_c));
+print STDERR "\t$hits_count reference sequences have one or more hits.\n";
+print STDERR "\t$reads_count reads have one or more hits.\n";
+print STDERR "\t$total_hits total hits were counted.\n";
+
+## Filtering the output based in the tags
+
+print_subheader("1.3- Filtering the Diamond output.");
+my $outsam_f = File::Spec->catfile($d01dir, "DiamondMappingFiltered.sam");
+
+if (-e $outsam_f) {
+
+    print STDERR "\tSam file found ($outsam_f).\n\tSkipping filtering\n";
+}
+else {
+
+    ## Check that we have any filter
+    if ($opt_f) {
+
+	my ($fh_hf, $fr_hf, $th) = filter_sam($outsam, $outsam_f, \%dmdfilter);
+
+	my $hitsc = scalar(keys(%{$fh_hf}));
+	my $readsc = scalar(keys(%{$fr_hf}));
+	print STDERR "\tStats after the filtering:\n";
+	print STDERR "\t$hitsc reference sequences have one or more hits.\n";
+	print STDERR "\t$readsc reads have one or more hits.\n";
+	print STDERR "\t$th total hits were counted.\n";
+    }
+    else {
+    
+	## No filter was set up
+	$outsam_f = $outsam;
+	print STDERR "\tNo filter was set up. Skipping step.\n";
+    }
+}
+
+print_subheader("1.4- Estimating completeness in the read mapping.");
+
+
+my $outcov = File::Spec->catfile($d01dir, "DiamondMapping.coverage.txt");
+
+if (-e $outcov) {
+
+    print STDERR "\tCoverage file found ($outcov).\n";
+    print STDERR "\tSkipping coverage estimation\n";
+}
+else {
+
+    calculate_mapping_coverage($outsam, $fastaref, $outcov);
+    print STDERR "\tCalculate mapping coverage complete.\n";
+}
+
+my $repfile = File::Spec->catfile($d01dir, "DiamondMapping.CompSummary.txt");
+my %mapcomp_hr = estimate_map_completeness($outcov, \%grouplen_std, $repfile);
+
+my $reportfile = File::Spec->catfile($d01dir, "DiamondMapping.PepRefSummary.txt");
+
+print_peprefset_report(\%mapcomp_hr, $reportfile);
+
+## Once the completeness has been evaluated, it will get the seed reads to perform
+## an initial de-novo assembly
+
+print_subheader("1.5- Pre-selecting reads from Fastq files.");
+my $d04dir = dmd_mkdir($outdir, "04_ExtractedReads");
+
+## For this part it will be easier just to read the fastq files searching in 
+## a hash with the reads. 
+
+my $hits_fname = File::Spec->catfile($d04dir, "DndHitsReadIDs.txt");
+
+unless (-e $hits_fname) {
+
+    my @selection_cmd = ('grep -v "^@"',$outsam_f,"|","cut -f1","|","sort -u");
+    
+    ## Add the file out and run it
+    push(@selection_cmd, "> $hits_fname"); 
+    my $run_select = join(" ", @selection_cmd); 
+    my @select_run = run( command => $run_select, verbose => $opt_V );
+}
+else {
+
+    print STDERR "\t$hits_fname file found. Skipping step.\n";
+}
+## Once the list has been created it will run seqtk to pre-select the reads
+
+my $fqfname = File::Spec->catfile($d04dir, "DndHitsReadSet.fq");
+
+unless (-e $fqfname) {
+
+    foreach my $infile (@fqlist) {
+
+	my @seqtk_cmd = ($exepath{'seqtk'}, 'subseq', $infile, $hits_fname);
+
+	## it will append the files for each of the inputs
+	push(@seqtk_cmd, ">> $fqfname"); 
+	
+	my $run_seqtk = join(" ", @seqtk_cmd); 
+	my @seqtk_run = run( command => $run_seqtk, verbose => $opt_V );
+    }
+}
+else {
+
+    print STDERR "\t$fqfname file found. Skipping step.\n";
+}
+
+
+
+
+
+
+
+###################################################################################
+## ASSEMBLY
+## The assembly process will be an iteractive process controlled by the number
+## of assembly rounds. The assembly will be divided in the folowing steps:
+##  1- Read assembly using Minia
+##  2- Contig extension using Mapsembler2
+##  3- Read mapping to the Mapsembler2 results
+##  4- Read extraction from the mapping
+##  5- Read re-assembly with Minia
+###################################################################################
+
+print_header("2) Performing de-novo assemblies");
+
+my $d05dir = dmd_mkdir($outdir, "05_Assembly");
+
+my $cur_rd = 1;
+my $readfile = $fqfname;
+
+while($cur_rd <= $assembly_rounds) {
+
+    my $d05dir_R = dmd_mkdir($d05dir, "Assembly_Round" . $cur_rd);
+    
+    ####### 1- MINIA ASSEMBLY ###################################################
+    
+    print_subheader("2.1.".$cur_rd."- Minia assembly for round $cur_rd");
+
+    ## It will check if exists the minia contigs file
+
+    my $ctgfile = File::Spec->catfile($d05dir_R, "MergedMiniaAssembly.contigs.fa");
+    if (-e $ctgfile) {
+    
+	print STDERR "\n\t$ctgfile Minia contig file found. Skipping step.\n";
+    }
+    else {
+    
+	$ctgfile = run_minia($readfile, $d05dir_R, \%minia_args);
+	print STDERR "\n\tMinia assembly has been performed\n";
+    }
+
+    ####### 2- CONTIG EXTENSION ##################################################
+    
+    print_subheader("2.2.".$cur_rd."- Contig extension for round $cur_rd");
+
+    my $extfile = File::Spec->catfile($d05dir_R, "MergedExtendedContigs.fa");
+    if (-e $extfile) {
+    
+	print STDERR "\n\t$extfile extended contig file found. Skipping step.\n";
+    }
+    else {
+    
+	$extfile = run_mapsembler($ctgfile, \@fqlist, $d05dir_R, \%mapbler_args);
+	print STDERR "\n\tMapsembler extension has been performed\n";
+    }
+    
+    ####### 3- MAPPING READS ##################################################
+    
+    print_subheader("2.3.".$cur_rd."- Mapping reads to contigs for round $cur_rd");
+
+    my $mapfile = File::Spec->catfile($d05dir_R, "MergedMappedReads.sam");
+    if (-e $mapfile) {
+    
+	print STDERR "\n\t$mapfile mapped reads file found. Skipping step.\n";
+    }
+    else {
+    
+	$mapfile = run_readmap($extfile, \@fqlist, $d05dir_R, \%bwt_args);
+	print STDERR "\n\tMapping reads to the contigs has been performed\n";
+    }
+
+    ####### 4- READ EXTRACTION ##################################################
+    
+    print_subheader("2.4.".$cur_rd."- Read extraction for round $cur_rd");
+
+    $readfile = File::Spec->catfile($d05dir_R, "MergedExtractedReads.fastq");
+    if (-e $readfile) {
+    
+	print STDERR "\n\t$readfile reads file found. Skipping step.\n";
+    }
+    else {
+    
+	$readfile = run_extractreads($mapfile, $d05dir_R);
+	print STDERR "\n\tReads extraction has been performed\n";
+    }
+
+    ####### 5- RE-ASSEMBLY ##################################################
+    ## Because this process it is in a loop, it will come to the begining
+    ## to perform the assembly except if it is out of the loop    
+
+    $cur_rd++;
+}
+
+## Final reassembly out of the loop
+my $finalctgs = File::Spec->catfile($d05dir, "MergedMiniaAssembly.contigs.fa");
+my $finalctgs_sz = '';
+
+if (-e $finalctgs) {
+    
+    print STDERR "\n\tFinal Minia contig file ($finalctgs) found. Skipping step.\n";
+}
+else {
+    
+    $finalctgs = run_minia($readfile, $d05dir, \%minia_args);
+    print STDERR "\n\tFinal Minia assembly has been performed\n";
+}
+
+
+##################################################################################
+## STRUCTURAL ANNOTATION
+## Once the contigs have been produced, the script will run Augustus to produce
+## the CDS and the protein sequneces. Because Augustus runs on a single core and
+## it can use PRFs, the program will divide the contig by hits to the original 
+## sequences. The steps will be:
+##  1- Splitting of the contigs
+##  2- Run of multithreaded Augustus
+##  3- Parse the Augustus output
+##################################################################################
+
+print_header("3) Performing gene structure annotation");
+
+my $d06dir = dmd_mkdir($outdir, "06_StructuralAnnotation");
+my $d06dir_s01 = dmd_mkdir($d06dir, "01_OneContigPerFile");
+
+print_subheader("3.1. Splitting contigs");
+
+opendir(my $d06dir_dh, $d06dir_s01);
+
+my %fcontigs = ();
+
+while(readdir $d06dir_dh) {
+
+    my $subdir = File::Spec->catfile($d06dir_s01, $_);
+    opendir(my $subdir_dh, $subdir);
+
+    while(readdir $subdir_dh) {
+
+	if ($_ =~ m/^(.+)_contigs.fa/) {
+	
+	    $fcontigs{$1} = File::Spec->catfile($subdir, $_);
+	}
+    }
+}
+
+my $contigs_c = scalar(keys(%fcontigs));
+
+if ($contigs_c > 0) {
+
+    print STDERR "\t$contigs_c final contigs were found. Skipping step.\n";
+}
+else {
+
+    my $seqio = Bio::SeqIO->new( -file => "$finalctgs", -format => 'Fasta' );
+
+    ## At the same time it will be convinient to create a file will all the 
+    ## sequences with the new names
+    
+    my $f_assembly =  File::Spec->catfile($d05dir, "FinalAssembly.contigs.fa");
+    my $fa_seqio = Bio::SeqIO->new( -file => ">$f_assembly", -format => 'Fasta' );
+
+    ## The will need also a file with the CtgID\tCtgLength for later on bedtools
+
+    my $fa_sizes = File::Spec->catfile($d05dir, "FinalAssembly.contigs.sizes.txt");
+    open my $fasz_fh, '>', $fa_sizes;
+
+    my $seqn = 0;
+    my $boxn = 0;
+    my $box_count = 0;
+    my $boxdir = '';
+    while( my $seqobj = $seqio->next_seq() ) {
+    
+	$seqn++;
+	
+	## The script will put a max of 500 sequences per directory
+	
+	if ($boxn == 0) {
+
+	    my $boxname = "CtgBox" . sprintf("%02s", $box_count);
+	    $boxdir = File::Spec->catfile($d06dir_s01, $boxname);
+	    mkdir($boxdir);
+	}
+	
+	
+	## We do not care about IDs, so we will re-name the scaffolds with
+	## the same name than the file.
+	
+	my $ctg_id = "CONTIG" . sprintf("%07s", $seqn);
+	my $seqfile = File::Spec->catfile($boxdir, $ctg_id . "_contigs.fa");
+    
+	my $newseqio = Bio::SeqIO->new( -file => ">$seqfile", -format => 'Fasta' );
+
+	## Create tho object and write it
+	my $newseqobj = Bio::Seq->new( -id => $ctg_id, seq => $seqobj->seq() );
+	$newseqio->write_seq($newseqobj);
+	$fa_seqio->write_seq($newseqobj);
+	print $fasz_fh "$ctg_id\t$seqobj->length()\n";
+	
+	$fcontigs{$ctg_id} = $seqfile;
+	
+	$boxn++;
+	if ($boxn > 500) {
+	
+	    $boxn = 0;
+	    $box_count++;
+	}
+    }
+
+    $finalctgs = $f_assembly;
+    $finalctgs_sz = $fa_sizes;
+
+    print STDERR "\n\t$seqn sequence files have been created";
+}
+
+
+print_subheader("3.2- Performing Augustus prediction");
+
+my $d06dir_s02 = dmd_mkdir($d06dir, "02_AugustusPredictions");
+
+opendir(my $d06dir02_dh, $d06dir_s02);
+
+my %augustus_out = ();
+
+while(readdir $d06dir02_dh) {
+
+    my $subdir = File::Spec->catfile($d06dir_s02, $_);
+    opendir(my $subdir_dh, $subdir);
+
+    while(readdir $subdir_dh) {
+
+	if ($_ =~ m/^(.+)_augustus.txt/) {
+	
+	    $augustus_out{$1} = File::Spec->catfile($subdir, $_);
+	}
+    }
+}
+
+my $aug_c = scalar(keys(%augustus_out));
+
+if ($aug_c > 0) {
+
+    print STDERR "\t$aug_c Augustus files were found. Skipping step.\n\n";
+}
+else {
+    
+    %augustus_out = run_augustus(\%fcontigs, $d06dir_s02, $threads);
+    $aug_c = scalar(keys(%augustus_out));
+    print STDERR "\n\t$aug_c Augustus files have been produced.\n";
+}
+
+print_subheader("3.3- Parsing the Augustus output");
+
+my $d06dir_s03 = dmd_mkdir($d06dir, "03_GeneModels");
+
+my ($gfffile, $cdsfile, $pepfile) = parse_augustus(\%augustus_out, $d06dir_s03);
+
+
+##################################################################################
+## EVALUATION
+## The evaluation steps will be composed by different steps:
+##  1- BUSCO run on the final contigs (mode genome)
+##  2- BUSCO run on the protein set predicted by Augustus
+##  3- Read remapping to the contigs
+##  4- Mappin coverage evaluation
+##  5- Variant calling and heterozygosity evaluation
+##################################################################################
+
+print_header("4) Performing genomic evaluations");
+
+## First, it will run the BUSCO evaluation for the genome and the protein
+
+print_subheader("4.1- BUSCO run on the genome assembly");
+
+my $d07dir = dmd_mkdir($outdir, "07_GeneSpaceEvaluation");
+my $d07dir_s01 = dmd_mkdir($d07dir, "01_GeneSpace_By_Genome");
+
+my %busco_args_g = (
+    '--lineage_path' => $buscolineage,
+    '--mode'         => 'genome',
+    '--cpu'          => $threads
+    );
+
+
+my $gbusco_dir = '';
+if ($opt_b) {
+
+    my $exp_gbuscodir = File::Spec->catfile($d07dir_s01, "run_BUSCO_genome");
+    if (-d $exp_gbuscodir) {
+	
+	print STDERR "\n\t$exp_gbuscodir directory found. Skipping step.\n";
+	$gbusco_dir = $exp_gbuscodir;
+    }
+    else {
+	
+	$gbusco_dir = run_busco($finalctgs, \%busco_args_g, $d07dir_s01);
+    }
+}
+else {
+
+    print STDERR "\n\tBUSCO analysis disable. Skipping step.\n";
+}
+
+print_subheader("4.2- BUSCO run on the predicted proteins");
+
+my $d07dir_s02 = dmd_mkdir($d07dir, "02_GeneSpace_By_ProteinSet");
+
+my %busco_args_p = (
+    '--lineage_path' => $buscolineage,
+    '--mode'         => 'proteins',
+    '--cpu'          => $threads
+    );
+
+my $pbusco_dir = '';
+if ($opt_b) {
+
+    my $exp_pbuscodir = File::Spec->catfile($d07dir_s02, "run_BUSCO_proteins");
+    if (-d $exp_pbuscodir) {
+	
+	print STDERR "\n\t$exp_pbuscodir directory found. Skipping step.\n";
+	$pbusco_dir = $exp_pbuscodir;
+    }
+    else {
+	
+	$pbusco_dir = run_busco($pepfile, \%busco_args_p, $d07dir_s02);
+    }
+}
+else {
+
+    print STDERR "\n\tBUSCO analysis disable. Skipping step.\n";
+}
+
+## Then, it will remap the reads, change to bam, sort and use for bedtools 
+## (genomecov) and for freebayes to call SNPs
+
+print_subheader("4.3- Re-mapping reads to the contigs");
+
+my $d07dir_s03 = dmd_mkdir($d07dir, "03_ReadRemappingEvaluation");
+
+my $remapfile = File::Spec->catfile($d07dir_s03, "FinalCtgsMappedReads.sam");
+if (-e $remapfile) {
+    
+    print STDERR "\n\t$remapfile mapped reads file found. Skipping step.\n";
+}
+else {
+    
+    my $remapout = run_readmap($finalctgs, \@fqlist, $d07dir_s03, \%bwt_args);
+    print STDERR "\n\tMapping reads to the contigs has been performed\n";
+    move($remapout, $remapfile);
+}
+
+## Change from sam to bam and sort
+
+my $sortedbam = File::Spec->catfile($d07dir_s03, "FinalCtgsMappedReads.sorted.bam");
+if (-e $sortedbam) {
+    
+    print STDERR "\n\t$sortedbam Sorted Bam file found. Skipping step.\n";
+}
+else {
+    
+    $sortedbam = run_bamsort($remapfile, $d07dir_s03);
+    print STDERR "\n\tSorting of the mapping reads has been performed\n";
+}
+
+print_subheader("4.4- Analyzing read mapping coverage");
+
+my $covfile = File::Spec->catfile($d07dir_s03, "FinalAssembly.coverage.txt");
+my $covsumm = File::Spec->catfile($d07dir_s03, "SummaryGenomeCoverage.txt");
+
+if (-e $covfile) {
+    
+    print STDERR "\n\t$covfile genome coverage file found. Skipping step.\n";
+}
+else {
+
+    $covfile = run_bedtools($finalctgs_sz, $sortedbam, $d07dir_s03);
+    print STDERR "\n\tAnalysis of the contig coverage has been performed\n";
+
+    ## Now it will parse the file and it will create a report file with the
+    ## CtgID\tMinCov\tMaxCov\tMeanCov\n and a extra first row with
+    ## WholeAssembly\tMinCov\tMaxCov\tMeanCov.
+
+    make_covsum_file($covfile, $covsumm);
+}
+
+
+
+
+
+$date = `date`;
+chomp($date);
+print STDERR "\n\n############################################################";
+print STDERR "\n## BuscoDiamonds Ends ($date)   ##\n";
+print STDERR "############################################################\n\n";
+exit;
+
+
+##############################################################################
+##############################################################################
+##
+## FUNCTIONS
+##
+###############################################################################
+## function to print the script help
+###############################################################################
+
+sub help {
+  print STDERR <<EOF;
+  $0:
+
+    BuscoDiamonds
+    Pipeline to evaluate/rebuild the GeneSpace in non assembled Illumina reads
+
+    Usage:
+
+       BuscoDiamonds [-h] -r <fasta_reference> 
+                          -i <fastq_input_files> 
+                          -o <outputdir>
+                          [-f <hits_filters>] 
+                          [-t <threads>] 
+                          [-c <consensus_perc>]
+			  [-m <minia_args>]
+                          [-R]
+
+    Description:
+      
+     This program has several functions:
+      1- Evaluate the completeness of the gene space in a whole genome 
+         sequencing dataset that has not been assembled.
+      2- Reconstruct the gene/CDS/protein associated with the hits of the
+         Gene Space reference.
+      3- Evaluate the duplication level of the analyzed Gene Space.
+      4- Estimate the genome coverage and heterozygosity based in the 
+         reconstruction of the evaluation Gene Space set.
+
+     We define the gene space as the gene population in the genome of a 
+     specific individual or accession. So, for example, the gene space for the 
+     Arabidopsis thaliana Col. genome (annotation TAIR10) is composed by 27,416 
+     genes.
+
+     A gene space representative is serie of proteins that could be found in 
+     most of the species of a specific clade. So for example, if all the 
+     Brassicaceae species shared the same 8,000 genes, a gene space 
+     representaive for the Brassicaeae clade will have an ancestor single copy 
+     ortholog of those genes. You can find more information about the ortholog 
+     datasets at Zdobnov et al. 2017 (OrthoDB v9.1) and Waterhouse et al. 2017 
+     (BUSCO3).  
+  
+     This scripts uses DIAMOND (Buchfink et al. 2015) to align unassembled short
+     reads against a BUSCO/OrthoDB dataset to evaluate the completness of the
+     genome before the assembly, but at the same time re-construct the genes, 
+     CDS and proteins to retrieve more information (e.g. heterozygosity, 
+     coverage...).
+
+     Prerrequisites
+      * Bioperl
+      * Diamond accessible from the path or as the env. variable DIAMOND_PATH
+      * Seqtk accessible from the path or as the env. variable SEQTK_PATH
+      * Minia accessible from the path or as the env. variable MINIA_PATH
+      * Exonerate accessible from the path or as the env. variable 
+        EXONERATE_PATH
+      * Gapcloser accessible from the path or as the env. variable 
+        GAPCLOSER_PATH 
+
+     Steps
+      1-  Create the DIAMOND database.
+      2-  Align the reads against the DIAMOND database.
+      3-  Parse the sam DIAMOND output into Bioperl Align objects.
+      4-  Call the Protein Consensus
+      5-  Run the evaluation of the completeness of the protein set.
+      6-  Build the CDS for each of the proteins
+      7-  Estimate the coverage average for each CDS
+      8-  Estimate the heterozygosity for each CDS
+      9-  Build the gene sequence with introns like gaps
+      10- Run GapCloser to fill the intron-gaps.
+
+     Examples of running commands
+      # Basic command
+      BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
+                    -o MySp_BuscoDiamonds2018
+
+      # Filtering the hits with percentage of similarity below 60%
+      BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
+                    -o MySp_BuscoDiamonds2018 -f ZI=60
+
+      # Calling the consensus protein sequence with a minimum of 90%
+      BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
+                    -o MySp_BuscoDiamonds2018 -c 90
+ 
+    Flags:
+
+      -r <fasta_reference>  Fasta file with the reference proteins (mandatory)
+      -i <fastqinputfiles>  Fastq input file(s) separated by commas (mandatory) 
+      -o <output_dir>       Output directory (mandatory)
+      -f <hits_filter>      Filter for Diamond hits as tag1=val1,tag2=val2...
+      -t <num_threads>      Number of threads to run Diamond (default: all)
+      -c <consensus_perc>   Consensus percentage threshold for the protein seq.
+      -m <minia_args>       Minia args. as arg=value separated by commas
+      -V <be_verbose>       Be verbose and print the parsing status.
+      -v <version>          print version
+      -h <help>             print the help
+
+
+EOF
+exit (1);
+}
+
+
+##############################################################################
+## Just a simple function to print a message with some format
+##############################################################################
+
+sub print_header {
+    my $message = shift;
+
+    my $date = `date`;
+    chomp($date);
+
+    print STDERR "\n";
+    print STDERR "============================================================";
+    print STDERR "\n $message ($date)\n";
+    print STDERR "============================================================";
+    print STDERR "\n\n";
+}
+
+
+##############################################################################
+## Another simple function to print a message with some format
+##############################################################################
+
+sub print_subheader {
+    my $message = shift;
+
+    my $length = length($message);
+    my $subline = "-" x $length; 
+ 
+    print STDERR "\n\t$message\n\t$subline\n\n";
+}
+
+
+##############################################################################
+## dmd_mkdir
+## A function to check if exists a directory and if it doesnt create one
+## dmd_mkdir($outbase, $dirname); 
+##############################################################################
+
+sub dmd_mkdir {
+    my $outdir = shift();
+    my $dname = shift();
+    my $ddir = File::Spec->catfile($outdir, $dname);
+
+    if (-d $ddir) {
+
+	print STDERR "\t$dname directory found.\n\tSkipping mkdir.\n\n";
+    }
+    else {
+
+	mkdir($ddir); 
+	print STDERR "\tCreating $ddir.\n";
+    }
+
+    return($ddir);
+}
+
+
+###############################################################################
+## create_diamond_db
+## function to create a Diamond DB from a protein fasta file
+## create_diamond_db($fastaref, $dbname);
+###############################################################################
+
+sub create_diamond_db {
+    my $fastaref = shift();
+    my $outbase = shift();
+
+    ## Build the command
+    my @run_dmddb = ($exepath{'diamond'},  'makedb'); 
+    
+    ## Add the input fasta file and the output
+    push(@run_dmddb, "--in $fastaref");
+    push(@run_dmddb, "--db $outbase"); 
+    
+    if ($opt_t) {
+    
+	push(@run_dmddb, "--threads $opt_t"); 
+    }
+
+    my $run_dmddb = join(" ", @run_dmddb); 
+
+    if ($opt_V) {
+    
+	print STDERR "\n\tRunning command\n\t$run_dmddb\n";
+    }
+
+    my @s011_run = run( command => $run_dmddb, verbose => $opt_V );
+
+}
+
+###############################################################################
+## run_diamond()
+## A function to run diamond over an input set
+## run_diamond($dbname, \@fqlist, $outsam); 
+###############################################################################
+
+sub run_diamond {
+    my $dbname = shift();
+    my @infiles = @{shift()};
+    my $outsam = shift();
+
+    ## Build the command
+    ## To be able to work with more than one file, we will concatenate them
+    ## and supply them as stdin
+
+    my @run_dmd = ('cat', @infiles, '|');
+
+    ## Then we will add the diamon command
+
+    push(@run_dmd, $exepath{'diamond'} . ' blastx'); 
+    
+    ## Add the input fasta file and the output
+    push(@run_dmd, "--db $dbname");
+    push(@run_dmd, "--outfmt 101"); 
+    
+    if ($opt_t) {
+    
+	push(@run_dmd, "--threads $opt_t"); 
+    }
+
+    ## Finally it will concatenate the results to filter out the non
+    ## mapped with a simple awk command
+    push(@run_dmd, "| awk '{ if (\$2 != 4) print \$0}' > $outsam"); 
+
+    my $run_dmd = join(" ", @run_dmd); 
+
+    if ($opt_V) {
+    
+	print STDERR "\n\tRunning command\n\t$run_dmd\n";
+    }
+
+    my @run01dmd = run( command => $run_dmd, verbose => $opt_V );
+}
+
+################################################################################
+## filter_sam();
+## function to filter a sam file based in the diamond tags
+## my ($fhitshref, $freadshref, $thits) = filter_sam($input, $output, $filhref)
+################################################################################
+
+sub filter_sam {
+
+    my $outsam = shift();
+    my $outsam_f = shift();
+    my %dmdfilter = %{shift()};
+
+    my %fhits_c = ();
+    my %freads_c = ();
+    my $thits = 0;
+    
+    open my $filthits_fh, '>', $outsam_f;
+    open my $rawhits2_fh, '<', $outsam;
+    while(<$rawhits2_fh>) {
+	
+	chomp($_);
+	if ($_ =~ /^@/) {
+	    
+	    print $filthits_fh "$_\n";
+	}
+	else {
+	
+	    my @ln = split(/\t/, $_);
+
+	    ## The tags are present from column 12 to 20
+	    my %tags = ();
+	    foreach my $tag (@ln[11..19]) {
+		
+		if ($tag =~ m/^(..):.:(.+)$/) {
+		    
+		    $tags{$1} = $2;
+		}
+	    }
+	    
+	    ## Once the tags have been set, we will check if the parameters
+	    ## are met
+	    
+	    my $select = 1;
+	    foreach my $dmd_f (sort keys %dmdfilter) {
+		
+		if ($dmdfilter{$dmd_f} > $tags{$dmd_f}) {
+		    
+		    ## It does not meet the condition
+		    $select = 0;
+		}
+	    }
+	    
+	    ## Finally print the output if the all the conditions are met
+	    if ($select == 1) {
+		
+		print $filthits_fh "$_\n";
+		$fhits_c{$ln[2]}++;
+		$freads_c{$ln[0]}++;
+		$thits++;
+	    }
+	}
+    }
+
+    return(\%fhits_c, \%freads_c, $thits);
+}
+
+###############################################################################
+## calculate_mapping_coverage()
+## A function to evaluate the completeness of the Diamond mapping and 
+## produce a file with the format: SeqID\tCovPos1,CovPos2...
+## calculate_mapping_coverage($insam, $fasta_ref, $outfile);
+###############################################################################
+
+sub calculate_mapping_coverage {
+
+    my $samfile = shift();
+    my $fasta_ref = shift();
+    my $outfile = shift;
+
+    ## First capture the length of the references and create a coverage
+    ## arrayref
+
+    my %ref_seql = ();
+    my %ref_cov = ();
+    my %ref_hits = ();
+    
+    my $seqio = Bio::SeqIO->new( -file => $fasta_ref, -format => 'Fasta');
+	    
+    while ( my $seqobj = $seqio->next_seq() ) {
+		 
+	my $seqid = $seqobj->id();
+	my $seq = $seqobj->seq();
+	$ref_seql{$seqid} = length($seq);
+	
+	my $counter = $seq;
+	$counter =~ s/./0/g;
+	my @counter = split(//, $counter); 
+	$ref_cov{$seqid} = \@counter;
+    }
+
+    ## Second parse the SAM file and modify the arrayref accordingly
+    open my $samffh, '<', $outsam_f;
+    while(<$samffh>) {
+
+	chomp($_);
+	if ($_ !~ m/^@/) {
+	    
+	    my @fsam = split(/\t/, $_);
+	    my $seqid = $fsam[2];
+	    my $start = $fsam[3];
+	    my @cigar = split(/([A-Z]+)/, $fsam[5]);
+	    
+	    ## Add one to the counter
+	    if (exists $ref_hits{$seqid}) {
+		
+		$ref_hits{$seqid}++;
+	    }
+	    else {
+	    
+		$ref_hits{$seqid} = 1;
+	    }
+
+	    my $n = 0;
+	    my $dpos = $start;
+
+	    foreach my $cig (@cigar) {
+	    
+		if ($cig =~ m/^\d+$/) {
+		
+		    ## Get the tag
+		    my $tag = $cigar[$n+1];
+
+		    ## Calculate the top check
+		    my $tpos = $dpos + $cig;
+
+		    if ($tag eq 'M') {
+
+			while($dpos <= $tpos) {
+			
+			    $ref_cov{$seqid}->[$dpos-1]++;
+			    $dpos++;
+			}
+		    }
+		    elsif ($tag eq 'D') {
+		    
+			$dpos += $cig;
+		    }
+		}
+		$n++;
+	    }	    	    
+	}
+    }
+
+    ## Once the samfile has been processed, we will have a profile of 
+    ## coverage for each protein
+
+    open my $covfh, '>', $outfile;
+
+    foreach my $sid (sort(keys(%ref_cov))) {
+    
+	my $reads_n = 0; 
+	if ($ref_hits{$sid} && $ref_hits{$sid} =~ m/^\d+$/) {
+	
+	    $reads_n = $ref_hits{$sid};
+	}
+	my $cov = join(",", @{$ref_cov{$sid}});
+	print $covfh "$sid\t$reads_n\t$cov\n";
+    }
+}
+
+###############################################################################
+## estimate_map_completeness($outcov)
+## parse the coverage map file and estimate the completeness of the dataset
+## it can not estimate how duplicated is a genome
+## It will use SeqLen +/- 2*GroupSeqLenStd to evaluate if a hit is
+## complete
+## my %mapcomp = estimate_map_completeness($outcov, \%grplen_std);
+###############################################################################
+
+sub estimate_map_completeness {
+
+    my $covfile = shift(); 
+    my %grplen_std = %{shift()};
+    my $outfile = shift();
+    
+    my %completeness = ( missing => 0, fragmented => 0, complete => 0 );
+    my %report = ();
+
+    open my $covfh, '<', $covfile;
+    open my $outfh, '>', $outfile;
+
+    while(<$covfh>) {
+
+	chomp($_);
+	
+	my ($seqid, $readcount, $covline) = split(/\t/, $_); 
+	my @cov = split(/,/, $covline); 
+	my $seql = scalar(@cov); 
+	
+	my ($cov1, $cov5) = (0, 0);
+	foreach my $c (@cov) {
+	
+	    if ($c >= 1) {
+	    
+		$cov1++;
+		if ($c >= 5) {
+		
+		    $cov5++;
+		}
+	    }		    
+	}
+	
+	## First, if the coverage length < 10 Aa, we will consider missing
+	## the protein
+
+	my $exp_len = $grplen_std{$seqid}->{length};
+	my $exp_std = $grplen_std{$seqid}->{std};
+	my $min_len = $exp_len - (2 * $exp_std);
+	my $max_len = $exp_len + (2 * $exp_std);
+	
+	$report{$seqid} = [$exp_len, $exp_std, $readcount, $cov1, $cov5];
+
+	## Assign a tag
+
+	if ($cov1 < 10) {
+
+	    $completeness{missing}++;
+	    push(@{$report{$seqid}}, "missing");
+	}
+	else {
+
+	    ## Once we have calculated the coverage, it will copare them 
+	    ## with the expected length of the reference sequence
+	    ## If it is > 90% it will consider the sequence complete 	
+
+	    if ($cov1 <= $max_len && $cov1 >= $min_len) {
+	    
+		$completeness{complete}++;
+		push(@{$report{$seqid}}, "complete");
+	    }
+	    else {
+	    
+		$completeness{fragmented}++;
+		push(@{$report{$seqid}}, "fragmented");
+	    }
+	}    	
+    }
+
+    ## Print the report
+
+    print $outfh "##GroupID\tExpLen\tExpLenStd\tReadHits\tCV1\tCV5\tTag\n";
+    foreach my $sid (sort(keys(%grplen_std))) {
+	
+	unless (exists $report{$sid}) {
+	    
+	    my $explen = $grplen_std{$sid}->{length};
+	    my $expstd = $grplen_std{$sid}->{std};
+	    
+	    print $outfh "$sid\t$explen\t$expstd\t0\t0\t0\tmissing\n";
+	}
+	else {
+	    
+	    my $line = join("\t", @{$report{$sid}}); 
+	    print $outfh "$sid\t$line\n";
+	}
+    }
+
+
+    return(%completeness);
+}
+
+###############################################################################
+## print_peprefset_report()
+## A function to print the completness report from the Diamond mapping
+## print_peprefset_report(\%mapcomp_hr, $reportfile)
+###############################################################################
+
+sub print_peprefset_report {
+
+    my %mapcomp_hr = %{shift()};
+    my $reportfile = shift();
+
+    ## Print the completeness
+    ## Duplicated can not be resolved at this point
+    ## It will print a summary such as
+    ##         C:83.2%[S:NA,D:NA],F:3.3%,M:13.5%,n:1440
+    ##
+    ##        1198    Complete BUSCOs (C)
+    ##        NA      Complete and single-copy BUSCOs (S)
+    ##        NA      Complete and duplicated BUSCOs (D)
+    ##        47      Fragmented BUSCOs (F)
+    ##        195     Missing BUSCOs (M)
+    ##        1440    Total BUSCO groups searched
+
+    my $bc1 = $mapcomp_hr{complete};
+    my $bf1 = $mapcomp_hr{fragmented};
+    my $bm1 = $fastaref_count - ($bc1 + $bf1);
+
+    my $bcp1 = Math::BigFloat->new($bc1*100/$fastaref_count)->bfround(-1);
+    my $bfp1 = Math::BigFloat->new($bf1*100/$fastaref_count)->bfround(-1);
+    my $bmp1 = Math::BigFloat->new($bm1*100/$fastaref_count)->bfround(-1);
+    my $fcount1 = $fastaref_count;
+
+    my @report = (
+	"\n\tCompleteness summary:\n",
+	"\t\tC:$bcp1\%[S:NA,D:NA],F:$bfp1\%,M:$bmp1\%,n=$fcount1\n",
+	"\t\t$bc1\tComplete PEP_REFSETs (C)\n",
+	"\t\tNA\tComplete and single-copy PEP_REFSETs (S)\n",
+	"\t\tNA\tComplete and duplicated PEP_REFSETs (D)\n",
+	"\t\t$bf1\tFragmented PEP_REFSETs (F)\n",
+	"\t\t$bm1\tMissing PEP_REFSETs (M)\n",
+	"\t\t$fcount1\tTotal PEP_REFSET groups searched\n"
+	);
+
+    open my $sumfh, '>', $reportfile;
+
+    foreach my $message (@report) {
+    
+	print STDERR $message;
+	print $sumfh $message;
+    }
+
+}
+
+###############################################################################
+## extract_alignments()
+## function to extract map information from the sam file and convert it
+## into alignments
+## my %aligns = extract_alignments($sam);
+###############################################################################
+
+sub extract_alignments {
+
+    my $outsam_f = shift();
+
+    my %maps = ();
+    my %reads2map = ();
+
+    open my $samffh, '<', $outsam_f;
+    while(<$samffh>) {
+
+	chomp($_);
+	if ($_ !~ m/^@/) {
+	    
+	    my @fsam = split(/\t/, $_);
+	    
+	    ## The fields that we are interested to get are:
+	    ## $fsam[0] as readID
+	    ## $fsam[2] as refseqID
+	    ## $fsam[3] as start position
+	    ## $fsam[5] as CIGAR line to modify the alignment
+	    ## $fsam[9] as translated read file
+	    ## $fsam[13] as ZL diamond tag with the ref. sequence length but 
+	    ## it will try to find a match in the line just in case that in 
+	    ## future version of diamond this change
+
+	    my $refseql = 0;
+	    foreach my $f (@fsam) {
+	    
+		if ($f =~ m /^ZL:i:(\d+)$/) {
+		    $refseql = $1;
+		}
+	    }
+
+	    ## The program will extract the mapped read, it will add as many 
+	    ## dashes at the beginning of the read as $fsam[3] - 1 and as many
+	    ## at the end of the sequence as $fsam[15] - ($fsam[3] + $fsam[5])
+
+	    my $start_gaps = "-" x ($fsam[3] - 1);
+	    
+	    ## Now it will get the alignment structure from the CIGAR line
+	    ## M (matches) and D (deletions) are easy to handle in the alignment
+	    ## but insertions may need to modify the reference sequence.
+
+	    ## For now just skip the D and I matches
+
+	    if ($fsam[5] =~ m/^(\d+)M$/) {
+	
+		my $first_length = $1 + $fsam[3] - 1;
+		my $end_gap_length = $refseql - $first_length;
+		my $end_gaps = "-" x $end_gap_length;
+
+		## The read sequence gapped should be something like
+		my $readseqgap = $start_gaps . $fsam[9] . $end_gaps;
+
+		## Add the info to the hash
+	    
+		$reads2map{$fsam[0]} = $fsam[2];
+
+		if (exists $maps{$fsam[2]}) {
+		
+		    $maps{$fsam[2]}->{$fsam[0]} = $readseqgap;
+		}
+		else {
+		    
+		    $maps{$fsam[2]} = {$fsam[0] => $readseqgap};
+		}
+	    }	    
+	}	
+    }
+    return(\%maps, \%reads2map); 
+}
+
+###############################################################################
+## generate_consensus();
+## A function to generate consensus from the alignments
+## my %consensusfiles = generate_consensus(\%alignfiles, $outdir, $consperc);
+###############################################################################
+
+sub generate_consensus {
+
+    my %alignfiles = %{shift()};
+    my $d03dir = shift();
+    my $consperc = shift();
+
+    my %consensusfiles = ();
+
+    my $found = 0;
+
+    foreach my $seqid (sort keys %alignfiles) {
+
+	my $align_io = Bio::AlignIO->new(
+	    -file => $alignfiles{$seqid}, 
+	    -format => 'fasta'
+	    );
+
+	while ( my $alnobj = $align_io->next_aln() ) {
+
+	    ## First create the file to store the sequence
+	    my $cons_fname = File::Spec->catfile($d03dir, 
+						 $seqid . "_ConsensusPep.fa");
+	    $consensusfiles{$seqid} = $cons_fname;
+
+	    ## Check if it exists the file, if it does, skip the step
+
+	    unless (-e $cons_fname) {
+
+		open my $cons_fh, '>', $cons_fname;		
+            
+		## Remove the reference sequence before call the consensus
+		my $refseq = $alnobj->get_seq_by_id($seqid);
+		$alnobj->remove_seq($refseq);
+
+		if ($opt_V) {
+		    
+		#    print STDERR "\n\t\tCalling consensus $seqid alignment\n";
+		}
+
+		## Call the consensus
+		my $consensus = $alnobj->consensus_string($consperc);
+		
+		## Replace the ? sign by X
+		$consensus =~ s/\?/X/g;
+	    
+		## Print the consensus sequence
+		my $conseqname = $seqid . "_ConsPep";
+		print $cons_fh ">$conseqname\n$consensus\n";
+	    }
+	    else {
+	    
+		$found++;
+	    }
+	}
+    }
+
+    if ($found > 0) {
+    
+	print STDERR "\t$found consensus files found. Skipping step.\n";
+    }
+
+    return(%consensusfiles); 
+}
+
+
+###############################################################################
+## get_fastq_subsets();
+## a function to extract the fastq reads according the Diamond hits
+## Bioperl does not work well if many files are open, so the best option
+## is to use append
+## my %read_subfiles = get_fastq_subsets(\@fqlist, \%reads2aln, $d03dir); 
+###############################################################################
+
+sub get_fastq_subsets {
+
+    my $fqlist_aref = shift();
+    my $reads2aln_href = shift();
+    my $d03dir = shift;
+
+    my %reads2aln = %{$reads2aln_href};
+    
+    my %reads_subfiles = ();
+    foreach my $fastqin (@{$fqlist_aref}) {
+
+	print STDERR "\tExtracting reads for $fastqin file.\n";
+
+	## BioPerl is slow and give the error that it can not work with more
+	## than 1024 opened files. The solution is just to write our own
+	## parser
+
+	open my $fqin_fh, '<', $fastqin;
+	my $curr_readid = '';
+
+	while (<$fqin_fh>) {
+
+	    chomp($_);
+	    ## Get the read_id
+	    if ($_ =~ m/^@(.+)/) {
+	    
+		$curr_readid = $1;
+		$curr_readid =~ s/\s+.+//;
+	    }
+
+	    my $ref_id = $reads2aln{$curr_readid};
+
+	    if ($ref_id) {
+		    
+		my $subfq = File::Spec->catfile($d03dir, $ref_id."_subset.fq");
+		
+		## Use a regular open function to print files
+		open my $seqfh, '>>', $subfq;
+
+		## Just print the line
+
+		print $seqfh "$_\n";
+		close($seqfh);
+
+		## Store in the hashes
+		$reads_subfiles{$ref_id} = $subfq;
+	    }
+	} 
+    }
+    return(%reads_subfiles); 
+}
+
+###############################################################################
+## get_minia_args();
+## function to parse and check minia args
+## my %minia_args = get_minia_args(\%exepath);
+###############################################################################
+
+sub get_minia_args {
+
+    my %exepath = %{shift()}; 
+
+    my $minia_argsline = $opt_m;
+    my %minia_args = ();
+
+    ## There are some options that should not be used because it will 
+    ## produce problems downstream to process the output
+
+    my %minia_ban = (
+	'-graph'           => 1,
+	'-in'              => 1,
+	'-traversal'       => 1,
+	'-solid-kmers-out' => 1,
+	'-out'             => 1,
+	'-out-dir'         => 1,
+	);
+
+    if ($minia_argsline) {
+
+	my $minia_h = "$exepath{minia} -h ";
+	$minia_h .= "| sed -r 's/^\\s+//' | grep '^-' | sed -r 's/\\s+.+//'";
+	my @minia_h_run = run( command => $minia_h );
+	
+	my %perm_minia = ();
+	foreach my $minia_arg (split(/\n/, $minia_h_run[3]->[0])) {
+		       
+	    $perm_minia{$minia_arg} = 1;
+	}
+
+	foreach my $m_argline (split(/,/, $minia_argsline)) {
+    
+	    if ($m_argline =~ m/^(-.+?)=?(\w*)$/) {
+	
+		my $m_arg = $1;
+		my $m_val = $2;
+		unless (exists $perm_minia{$m_arg}) {
+	    
+		    my $error = "$m_arg is not Minia option";
+		    die("\nMINIA OPTION ERROR: $error.\n");
+		}
+		else {
+	    
+		    if (exists $minia_ban{$m_arg}) {
+			
+			my $warn = "Minia argument $m_arg can not be used.";
+			warn("\nWARNING: $warn\n");
+		    }
+		    else {
+			
+			$minia_args{$m_arg} = $m_val;
+		    }
+		}
+	    }
+	}
+    }
+    
+    return(%minia_args);
+}
+
+
+###############################################################################
+## get_mapbler_args();
+## function to parse and check mapbler args
+## my %mapbler_args = get_mapbler_args(\%exepath);
+###############################################################################
+
+sub get_mapbler_args {
+
+    my %exepath = %{shift()}; 
+    my $mapbler_argsline = shift();
+
+    my %mapbler_args = ( 'extremities' => {}, 'extend' => {} );
+
+    ## There are some options that should not be used because it will 
+    ## produce problems downstream to process the output
+
+    my %mapblerextr_ban = (
+	'--starters'          => 1,
+	'--reads'             => 1,
+	'--output'            => 1,
+	'--min-solid-subkmer' => 1,
+	'-help'               => 1,
+	'-debug'              => 1,
+	);
+
+     my %mapblerexte_ban = (
+	'-t'                  => 1,
+	'-o'                  => 1,
+	'-h'                  => 1,
+	);
+
+    if ($mapbler_argsline) {
+
+	my @mapblers = split(/;/, $mapbler_argsline); 
+
+	foreach my $mapbler (@mapblers) {
+	    
+	    if ($mapbler =~ m/^extremities:(.+)$/) {
+
+		my $extr_args = $1;
+
+		my $mapbl_tr_h = "$exepath{mapsembler2_extremities} -h 2>&1";
+		$mapbl_tr_h .= "| sed -r 's/^\\s+//' | grep '^-' ";
+		$mapbl_tr_h .= "| sed -r 's/\\s+.+//'";
+		my @mapbl_tr_h_run = run( command => $mapbl_tr_h );
+	
+		my %perm_mapbler_tr = ();
+		foreach my $mapbl_tr_arg (split(/\n/, $mapbl_tr_h_run[3]->[0])) {
+		    
+		    $perm_mapbler_tr{$mapbl_tr_arg} = 1;
+		}
+
+		foreach my $m_argline (split(/,/, $extr_args)) {
+    
+		    my @bline = split(/=/, $m_argline); 
+	    
+		    my $m_arg = $bline[0];
+		    my $m_val = $bline[1] || '';
+
+		    unless (exists $perm_mapbler_tr{$m_arg}) {
+		    
+			my $error = "$m_arg is not Mapsembler2 extremities option";
+			die("\nMAPSEMBLER OPTION ERROR: $error.\n");
+		    }
+		    else {
+			
+			if (exists $mapblerextr_ban{$m_arg}) {
+			
+			    my $warn = "Mapsembler2 extremities argument $m_arg ";
+			    $warn .= "can not be used.";
+			    warn("\nWARNING: $warn\n");
+			}
+			else {
+			
+			    $mapbler_args{'extremities'}->{$m_arg} = $m_val;
+			}
+		    }
+		}
+	    }
+	    elsif ($mapbler =~ m/^extend:(.+)$/) {
+
+		my $exte_args = $1;
+	
+		my $mapbl_te_h = "$exepath{mapsembler2_extend} -h 2>&1";
+		$mapbl_te_h .= "| sed -r 's/^\\s+//' | grep '^-' ";
+		$mapbl_te_h .= "| sed -r 's/\\s+.+//'";
+		my @mapbl_te_h_run = run(command => $mapbl_te_h);
+	    
+		my %perm_mapbler_te = ();
+		foreach my $mapbl_te_arg (split(/\n/, $mapbl_te_h_run[3]->[0])) {
+		
+		    $perm_mapbler_te{$mapbl_te_arg} = 1;
+		}
+	    
+		foreach my $m_argline (split(/,/, $exte_args)) {
+		
+		    my @bline = split(/=/, $m_argline); 
+		
+		    my $m_arg = $bline[0];
+		    my $m_val = $bline[1] || '';
+		
+		    unless (exists $perm_mapbler_te{$m_arg}) {
+		    
+			my $error = "$m_arg is not Mapsembler2 extend option";
+			die("\nMAPSEMBLER OPTION ERROR: $error.\n");
+		    }
+		    else {
+		    
+			if (exists $mapblerexte_ban{$m_arg}) {
+			    
+			    my $warn = "Mapsembler2 extend argument $m_arg ";
+			    $warn .= "can not be used.";
+			    warn("\nWARNING: $warn\n");
+			}
+			else {
+			    
+			    $mapbler_args{'extend'}->{$m_arg} = $m_val;
+			}
+		    }		
+		}
+	    }
+	    else {
+	
+		die("ERROR: -e <mapsembler_args> dont have the right format.\n");
+	    }
+	}
+    }    
+    
+    return(%mapbler_args);
+}
+
+
+###############################################################################
+## get_bowtie_args();
+## function to parse and check bowtie args
+## my %bwt_args = get_bowtie_args(\%exepath);
+###############################################################################
+
+sub get_bowtie_args {
+
+    my %exepath = %{shift()}; 
+    my $bowtie_argsline = shift();
+
+    my %bwt_args = ();
+
+    ## There are some options that should not be used because it will 
+    ## produce problems downstream to process the output
+
+    my %bwt_ban = (
+	'-x'               => 1,
+	'-1'               => 1,
+	'-2'               => 1,
+	'-U'               => 1,
+	'-S'               => 1,
+	'-q'               => 1,
+	'---qseq'          => 1,
+	'-f'               => 1,
+	'-r'               => 1,
+	'-c'               => 1,
+	'-s'               => 1,
+	'--skip'           => 1,
+	'-u'               => 1,
+	'--upto'           => 1,
+	'-5'               => 1,
+	'--trim5'          => 1,
+	'-3'               => 1,
+	'--trim3'          => 1,
+	'--phred33'        => 1,
+	'--phred64'        => 1,
+	'--int-quals'      => 1,
+	'--un'             => 1,
+	'--al'             => 1,
+	'--un-conc'        => 1,
+	'--al-conc'        => 1,
+	'--un-gz'          => 1,
+	'--met-file'       => 1,
+	'--met-stderr'     => 1,
+	'--met'            => 1, 
+        '--no-head'        => 1,
+        '--no-sq'          => 1,
+        '--rg-id'          => 1,
+        '--rg'             => 1,
+        '--omit-sec-seq'   => 1,
+	'--version'        => 1,
+	'-h'               => 1,
+	'--help'           => 1
+	);
+
+    if ($opt_w && $bowtie_argsline =~ m/.+/) {
+
+	my $bowtie_h = "$exepath{bowtie2} -h ";
+	$bowtie_h .= "| sed -r 's/^\\s+//' | grep '^-' | sed -r 's/\\s+.+//'";
+	my @bowtie_h_run = run( command => $bowtie_h );
+	
+	my %perm_bowtie = ();
+	foreach my $bowtie_arg (split(/\n/, $bowtie_h_run[3]->[0])) {
+		       
+	    $perm_bowtie{$bowtie_arg} = 1;
+	}
+
+	foreach my $b_argline (split(/,/, $bowtie_argsline)) {
+    
+	    my @bline = split(/=/, $b_argline); 
+	    
+	    my $b_arg = $bline[0];
+	    my $b_val = $bline[1] || '';
+
+	    unless (exists $perm_bowtie{$b_arg}) {
+	    
+		my $error = "$b_arg is not Bowtie2 option";
+		die("\nMINIA OPTION ERROR: $error.\n");
+	    }
+	    else {
+	    
+		if (exists $bwt_ban{$b_arg}) {
+		    
+		    my $warn = "Bowtie2 argument $b_arg can not be used.";
+		    warn("\nWARNING: $warn\n");
+		}
+		else {
+		    
+		    $bwt_args{$b_arg} = $b_val;
+		}
+	    }
+	}
+    }
+    else {
+	
+	die("\n\tERROR: -w <bowtie_args> dont have the right format.\n");
+    }
+    
+    return(%bwt_args);
+}
+
+
+
+
+###############################################################################
+## run_minia();
+## A function to run minia assemblies
+## my $minia_assembly = run_minia($readfile, $outdir, \%args);
+###############################################################################
+
+sub run_minia {
+    
+    my $fqfile = shift();
+    my $dir = shift();
+    my %minia_args = %{shift()};
+
+    ## Collect all the assembly files at 
+    my $assembly_file = '';
+
+    ## Minia command build
+    my @minia_cmd = ("$exepath{'minia'}");
+    push(@minia_cmd, "-in $fqfile");
+
+    ## Build the output
+
+    my $outbase =  File::Spec->catfile($dir, "MergedMiniaAssembly");
+
+    push(@minia_cmd, "-out $outbase");
+	
+    ## Add the arguments
+    foreach my $miniarg (sort keys %minia_args) {
+	
+	push(@minia_cmd, $miniarg . " ". $minia_args{$miniarg});
+    }
+
+    ## Merge and run
+    my $run_miniacmd = join(" ", @minia_cmd);
+	
+    my @minia_run = run( command => $run_miniacmd, verbose => $opt_V );
+    
+    if ($minia_run[0] == 0) {
+	
+	print STDERR "\n\tMinia run failed with error $minia_run[1]\n";
+    }
+    else {
+	
+	## Minia assembly could not produce a contig file, so
+	## it will check it before add it to the hash
+	
+	$assembly_file = $outbase . ".contigs.fa";
+	
+    }
+
+    return($assembly_file);
+}
+
+
+
+###############################################################################
+## run_mapsember();
+## A function to run mapsember extension
+## my $extfile = run_mapsembler($ctgfile, \@fqlist, $d05dir_R, \%mapbler_args);
+###############################################################################
+
+sub run_mapsembler {
+    
+    my $ctgfile = shift();
+    my @fqfiles = @{shift()};
+    my $dir = shift();
+    my %mapbler_args = %{shift()};
+
+    ## Collect all the assembly files at 
+    my $extension_file = '';
+
+    ## This is a tow step process:
+    ##  1- mapsembler2 extremities
+    ##  2- mapsembler2 extend
+
+    ## 1- Mapsembler2 extremities command build
+    my @mapbler_extr_cmd = ("$exepath{'mapsembler2_extremities'}");
+
+    ## Add the starters
+    push(@mapbler_extr_cmd, "--starters $ctgfile");
+
+    ## Add the reads
+    my $inputfqs = join(" ", @fqfiles);
+    push(@mapbler_extr_cmd, "--reads \"$inputfqs\"");
+
+    ## Build the output
+    my $outextr =  File::Spec->catfile($dir, "MergedMapsember2Extremities.fasta");
+    push(@mapbler_extr_cmd, "--output $outextr");
+	
+    ## Add the arguments
+    foreach my $mbextra (sort(keys(%{$mapbler_args{'extremities'}}))) {
+	
+	push(@mapbler_extr_cmd, 
+	     $mbextra . " ". $mapbler_args{'extremities'}->{$mbextra});
+    }
+
+    ## Merge and run
+    my $run_mapbler_extr_cmd = join(" ", @mapbler_extr_cmd);
+
+    if (-e $outextr) {
+
+	print STDERR "\n\tMapsembler2 extremities file exists. Skipping step.\n";
+    }
+    else {
+
+	my @mbextr_run = run( command => $run_mapbler_extr_cmd, verbose => $opt_V );
+    
+	if ($mbextr_run[0] == 0) {
+	
+	    print STDERR "\n\tMapsembler2 extremities run failed with error ";
+	    print STDERR "$mbextr_run[1]\n";
+	}	
+    }
+
+    ## Once extremities has run, it will run extend
+    ## 2- Mapsembler2 extend command build
+    my @mapbler_exte_cmd = ("$exepath{'mapsembler2_extend'}");
+
+    ## Add the starters
+    push(@mapbler_exte_cmd, "$outextr");
+
+    ## Add the reads
+    my $input_fqs = join(" ", @fqfiles);
+    push(@mapbler_exte_cmd, "$input_fqs");
+
+    ## Select the contig approach
+    push(@mapbler_exte_cmd, "-t 2");
+
+    ## Build the output
+    my $outbase_exte =  File::Spec->catfile($dir, "MergedMapsember2Extend");
+    push(@mapbler_exte_cmd, "-o $outbase_exte");
+    	
+    ## Add the arguments
+    foreach my $mbextea (sort(keys(%{$mapbler_args{'extend'}}))) {
+	
+	push(@mapbler_exte_cmd, 
+	     $mbextea . " ". $mapbler_args{'extend'}->{$mbextea});
+    }
+
+    ## Merge and run
+    my $run_mapbler_exte_cmd = join(" ", @mapbler_exte_cmd);
+    print STDERR "\n\tRunning Mapsembler2 extend\n";
+    my @mbexte_run = run( command => $run_mapbler_exte_cmd, verbose => $opt_V );
+    
+    if ($mbexte_run[0] == 0) {
+	
+	print STDERR "\n\tMapsembler2 extend run failed with error ";
+	print STDERR "$mbexte_run[1]\n";
+    }	
+
+    ## The expected output will be the outbase_exte + _k_$k + _c_$c +_t_$t
+    my $expected_out = $outbase_exte;
+    if ($mapbler_args{'extend'}->{'-k'}) {
+    
+	$expected_out .= "_k_" . $mapbler_args{'extend'}->{'-k'};	
+    }
+    else {
+    
+	$expected_out .= "_k_31";
+    }
+    if ($mapbler_args{'extend'}->{'-c'}) {
+    
+	$expected_out .= "_c_" . $mapbler_args{'extend'}->{'-c'};	
+    }
+    else {
+    
+	$expected_out .= "_c_2";
+    }
+    if ($mapbler_args{'extend'}->{'-t'}) {
+    
+	$expected_out .= "_t_" . $mapbler_args{'extend'}->{'-t'};	
+    }
+    else {
+    
+	$expected_out .= "_t_1";
+    }
+    $expected_out .= '.fasta';
+
+    ## Then it will move the name of the $expected out to MergedExtendedContigs.fa
+    my $mapbleroutfile =  File::Spec->catfile($dir, "MergedExtendedContigs.fa");
+    move($expected_out, $mapbleroutfile);
+
+    ## Additionally the program will create a serie of indexes that it will be
+    ## convinient to move
+
+    move("./index_k_*", $dir);
+
+    return($expected_out);
+}
+
+
+#################################################################################
+## run_readmap()
+## A function to map the reads back to the extended contigs using bowtie
+## $mapfile = run_readmap($extfile, \@fqlist, $d05dir_R, \%bwt_args);
+#################################################################################
+
+sub run_readmap {
+
+    my $extension_file = shift();
+    my @fastq_files = @{shift()};
+    my $dir = shift();
+    my %bwt_args = %{shift()};
+
+    ## First, create an index
+    my @bwtbuild_cmd = ("$exepath{'bowtie2-build'}");
+
+    ## Add the input file and the basename
+    push(@bwtbuild_cmd, "$extension_file");
+    my $basename = $extension_file;
+    $basename =~ s/\.\w+$//;
+    push(@bwtbuild_cmd, "$basename");
+
+    ## Run it
+    my $run_bwtbuild_cmd = join(" ", @bwtbuild_cmd);
+    print STDERR "\n\tRunning Bowtie2-build on $extension_file\n";
+    my @bwtbuild_run = run( command => $run_bwtbuild_cmd, verbose => $opt_V );
+        
+    if ($bwtbuild_run[0] == 0) {
+	
+	print STDERR "\n\tBowtie2-build run failed with error ";
+	print STDERR "$bwtbuild_run[1]\n";
+    }	
+
+    ## Now it will run the mapping
+    ## Because it will run it per library it needs to use the loop
+    ## Nevertheless the output should be the same for all, so let define it
+
+    my $mapfile = File::Spec->catfile($dir, "MergedMappedReads.sam");
+
+    ## Then it will run one file independenty without the pair end information
+    
+    my $nfile = 1;
+    foreach my $fqfile (@fastq_files) {
+    
+	my @bwt_cmd = ("$exepath{'bowtie2'}");
+
+	## Add the different arguments
+	foreach my $bwt_a (sort(keys(%bwt_args))) {
+	    
+	    push(@bwt_cmd, "$bwt_a $bwt_args{$bwt_a}");
+	}
+
+	## Add the reference
+	push(@bwt_cmd, "-x $basename");
+	
+	## Add the reads
+	push(@bwt_cmd, "-U $fqfile");
+
+	## And concatenate with samtools for its filtering
+	push(@bwt_cmd, "| samtools view -F 4 -S");
+
+	## We wab to produce a header, but only for the first map
+	if ($nfile == 1) {
+	
+	    push(@bwt_cmd, "-h");
+	}
+	
+
+	## Add the dash to indicate that it is a pipe
+	push(@bwt_cmd, "-");
+	## Finally add the output as added
+	push(@bwt_cmd, ">> $mapfile");
+
+	## And run it
+	my $run_bwt_cmd = join(" ", @bwt_cmd);
+	print STDERR "\n\tRunning Bowtie2 on $fqfile => $basename \n";
+	my @bwt_run = run( command => $run_bwt_cmd, verbose => $opt_V );
+        
+	if ($bwt_run[0] == 0) {
+	    
+	    print STDERR "\n\tBowtie2 run for $fqfile failed with error ";
+	    print STDERR "$bwt_run[1]\n";
+	}	 
+	$nfile++;
+    }
+    
+    ## Finally return the file
+    
+    return($mapfile);
+}
+
+
+#################################################################################
+## run_extractreads()
+## A function to extract reads from a sam file and put the into the
+## "MergedExtractedReads.fastq" file
+## $readfile = run_extractreads($mapfile, $d05dir_R);
+##################################################################################
+
+sub run_extractreads {
+
+    my $mapfile = shift();
+    my $dir = shift(); 
+
+    ## Create the output
+    my $readsfile = File::Spec->catfile($dir, "MergedExtractedReads.fastq");
+
+    open my $sam_fh, '<', $mapfile;
+    open my $read_fh, '>', $readsfile;
+    my $n = 0;
+    while(<$sam_fh>) {
+	
+	chomp($_);
+	if ($_ !~ m/^@/) {
+	    my @line = split(/\t/, $_);
+	    print $read_fh '@'.$line[0]."\n$line[9]\n+\n$line[10]\n";
+	    $n++;
+	}
+    }
+
+    print STDERR "\n\t$n reads have been extracted from $mapfile\n";
+    return($readsfile);
+}
+
+#################################################################################
+## run_augustus()
+## A function to run augustus over the scaffolds
+## ($gff, $cds, $pep) = run_augustus(\%assembly, \%prf_files, $d07dir_r);
+#################################################################################
+
+sub run_augustus {
+
+    my %assemblies = %{shift()};
+    my $odir = shift();
+    my $threads = shift();
+
+    ## This function should run in a multithread mode
+    ## To speed up, it will create packages with commands to run
+    ## in batches
+
+    my %packages = ();
+    my $p = 1;
+
+    my %augustus_out = ();
+
+    foreach my $seqid (sort(keys(%assemblies))) {
+
+	## The command for augustus will be something like
+	## /data/software/augustus-3.1/bin/augustus 
+	## --species=arabidopsis 
+	## --gff3=on 
+	## --proteinprofile=...prfl/EOG09360002.prfl 
+	## EOG0936011P.scaffolds.fa
+	## redirecting the output into a file
+
+	my @augustus_cmd = ("$exepath{'augustus'}");
+
+	## species should be something to change with a variable in the 
+	## future, but for now, just keep it as it is
+	push(@augustus_cmd, "--species=arabidopsis");
+	push(@augustus_cmd, "--gff3=on");
+
+	## We also want to produce the coding sequence abd the protein
+	## sequence
+
+	push(@augustus_cmd, "--codingseq=1");
+	push(@augustus_cmd, "--protein=1");
+
+	my @basedirs = split(/\//, dirname($assemblies{$seqid}));
+	my $lastname = $basedirs[-1];
+	my $outdir01 = File::Spec->catfile($odir, $lastname);
+	unless (-d $outdir01) {
+
+	    mkdir($outdir01);
+	}
+
+	my $outbase = File::Spec->catfile($outdir01, $seqid . "_augustus.txt");
+	$augustus_out{$seqid} = $outbase;
+
+	push(@augustus_cmd, "--outfile=" . $outbase);
+
+	## Finally add the input 
+	push(@augustus_cmd, $assemblies{$seqid});
+
+	my $run_augustus = join(" ", @augustus_cmd); 
+    
+	## Assign the command to a package
+
+	if (exists $packages{$p}) {
+
+	    push(@{$packages{$p}}, $run_augustus); 
+
+	    ## check if we have fill the package slots and increase the p one
+	    my $items_count = scalar(@{$packages{$p}});
+	    if ($items_count == $threads) {
+	    
+		$p++;
+	    }	   
+	}
+	else {
+
+	    $packages{$p} = [$run_augustus];
+	}
+    }
+    
+    my $pack_n = scalar(keys(%packages)); 
+    print STDERR "\n\t$pack_n job packages have been created.\n";
+
+    ## The commands should be packed by number of threads
+    ## now we will run the them in a multithread mode
+
+    foreach my $pack_idx (sort({$a <=> $b} keys(%packages))) {
+
+	print STDERR "\n\tSubmitting package $pack_idx\n";
+	my @jobs = @{$packages{$pack_idx}};
+	my $all_jobs = scalar(@jobs);
+	my $job_n = 0;
+
+	my @threads = ();
+	foreach my $job (@{$packages{$pack_idx}}) {
+
+	    my $thr_run = threads->create( sub{
+		    run( command => $job, verbose => $opt_V )
+		} );
+	    push(@threads, $thr_run);	   
+	}
+
+	foreach my $thr (@threads) {
+	
+	    my $thr_id = $thr->tid();
+	    my $thr_rs = $thr->join();
+	}
+    }    
+
+    return(%augustus_out);
+}
+
+
+###############################################################################
+## parse_augustus()
+## A function to parse the augustus results
+## my ($gfffile, $cdsfile, $pepfile) = parse_augustus(\%augustus, $outdir)
+###############################################################################
+
+sub parse_augustus {
+
+    my %augustus_out = %{shift()};
+    my $odir = shift();
+    
+    ## Hashes to store the data
+    my %gff = ();
+    my %cds = ();
+    my %pep = ();
+
+    ## Once augustus has been run, it will parse the outputfile
+    ## The output should produce two files: GFF and protein
+    ## It will need to start to parse with the mark "# start gene"
+    ## and finish as "# end gene"
+    
+    my $p = 0;
+    foreach my $seqid (sort(keys(%augustus_out))) {
+
+	open my $augout_fh, '<', $augustus_out{$seqid};
+	my $switch_parser = 0;
+	my $s = '';
+	my $gene_id = '';
+	while(<$augout_fh>) {
+	
+	    chomp($_); 
+	    
+	    if ($switch_parser == 1) {
+	    
+		if ($_ =~ m/^#/) {
+
+		    ## This will be the sequence region
+
+		    if ($_ =~ m/^#\s+end\s+gene/) {
+		
+			$switch_parser = 0;
+			$s =~ s/protein/;protein/;
+			my @par = split(/;/, $s); 
+
+			if ($par[0] =~ m/coding\s+\w+\s+=\s+\[(.+)\]/) {
+						
+			    $cds{$gene_id} = $1;
+			}
+			
+			if ($par[1] =~ m/protein\s+\w+\s+=\s+\[(.+?)\]/) {
+			    
+			    $pep{$gene_id} = $1;
+			}
+			
+			$s = '';
+		    }
+		    else {
+		
+			if ($_ =~ m/^#\s+(.+)$/) {
+			    
+			    $s .= $1;
+			}
+		    }
+		}
+		else {
+
+		    ## This is the GFF
+		    $_ =~ s/ID=\w+/ID=$gene_id/;
+		    $_ =~ s/Parent=\w+/Parent=$gene_id/;
+
+		    if (exists $gff{$gene_id}) {
+		    
+			push(@{$gff{$gene_id}}, $_);
+		    }
+		    else {
+		    
+			$gff{$gene_id} = [$_];
+		    }		
+		}
+	    }
+	    if ($_ =~ m/^#\s+start\s+gene\s+(\w+)$/) {
+	    
+		$gene_id = $seqid . "_" . $1;
+		$switch_parser = 1;
+	    }	    	
+	}
+	$p++;
+    }
+    print STDERR "\n\t$p augustus files have been parsed.\n";
+
+    ## At this point we have three hashes containing GFF, CDS and PEP
+    ## we will print them in one file per category
+
+    my $gfffile = File::Spec->catfile($odir, "MergedAugustus.gff");
+    my $cdsfile = File::Spec->catfile($odir, "MergedAugustus.CDS.fasta");
+    my $pepfile = File::Spec->catfile($odir, "MergedAugustus.PEP.fasta");
+    
+    open my $gfffh, '>', $gfffile;
+    print $gfffh "##gff-version 3\n";
+
+    my $cdsio = Bio::SeqIO->new( -file => ">$cdsfile", -format => 'Fasta');
+    my $pepio = Bio::SeqIO->new( -file => ">$pepfile", -format => 'Fasta');
+
+    my ($cdsc, $pepc) = (0, 0);
+    foreach my $geneid (sort(keys(%gff))) {
+    
+	my @gfflines = @{$gff{$geneid}};
+	my $pgffline = join("\n", @gfflines);
+	print $gfffh "$pgffline\n";
+
+	if ($cds{$geneid} =~ m/^[atgcn]+$/i) {
+
+	    my $cdsobj = Bio::Seq->new( -id => $geneid, -seq => $cds{$geneid}); 
+	    $cdsio->write_seq($cdsobj);
+	    $cdsc++;
+	}
+	else {
+	
+	    print STDERR "WARNING CDS PARSING:\n$geneid\n$cds{$geneid}\n";
+	}
+
+	if ($pep{$geneid} =~ m/^[A-Z]+$/i) {
+
+	    my $pepobj = Bio::Seq->new( -id => $geneid, -seq => $pep{$geneid}); 
+	    $pepio->write_seq($pepobj);
+	    $pepc++;
+	}
+	else {
+	
+	     print STDERR "WARNING PEP PARSING:\n$geneid\n$pep{$geneid}\n";	
+	}
+    }
+
+    print STDERR "\n\t$cdsc CDS and $pepc protein sequences have been predicted\n";
+
+    return($gfffile, $cdsfile, $pepfile);     
+}
+
+
+
+##################################################################################
+## run_busco()
+## A function to run BUSCO
+## my $gbusco_dir = run_busco($finalctgs, \%busco_args, $d07dir);
+##################################################################################
+
+sub run_busco {
+
+    my $inseq = shift(); 
+    my %busco_args = %{shift()};
+    my $odir = shift();
+
+    my @busco_cmd = ("$exepath{'run_BUSCO.py'}");
+ 
+    push(@busco_cmd, "--in $inseq");
+    
+    my $outbase = "BUSCO_".$busco_args{'--mode'};
+    my $outname = "run_" . $outbase;
+    my $b_outdir = File::Spec->catfile($odir, $outname);
+    push(@busco_cmd, "--out $outbase");
+
+    foreach my $busco_a (sort(keys(%busco_args))) {
+	
+	push(@busco_cmd, $busco_a." ".$busco_args{$busco_a});
+    } 
+  
+    my $run_busco_cmd = join(" ", @busco_cmd);
+    my @busco_run = run( command => $run_busco_cmd, verbose => $opt_V );
+    
+    if ($busco_run[0] == 0) {
+	
+	print STDERR "\n\tBUSCO run failed with error ";
+	print STDERR "$busco_run[1]\n";
+    }	
+
+    move($outname, $b_outdir);
+    return($b_outdir);
+}
+
+
+
+##################################################################################
+## run_bamsort()
+## function to transform sam into bam, sort it and create an index
+## $sortedbam = run_bamsort($remapfile, $d07dir_s03);
+##################################################################################
+
+sub run_bamsort {
+
+    my $samfile = shift();
+    my $odir = shift();
+
+    my $basename01 = "FinalCtgsMappedReads.bam";
+    my $bam = File::Spec->catfile($odir, $basename01);
+    my $basename02 = "FinalCtgsMappedReads.sorted.bam";
+    my $sortedbam = File::Spec->catfile($odir, $basename02);
+
+    ## Sam to bam
+    my @sam2bam_cmd = ("$exepath{'samtools'}");
+    push(@sam2bam_cmd, "view -Sb -o $bam $samfile"); 
+    my $run_sam2bam_cmd = join(" ", @sam2bam_cmd);
+    my @sam2bam_run = run( command => $run_sam2bam_cmd, verbose => $opt_V );
+    
+    if ($sam2bam_run[0] == 0) {
+	
+	print STDERR "\n\tsamtools view (sam2bam) run failed with error ";
+	print STDERR "$sam2bam_run[1]\n";
+    }	
+    
+    ## Sort the bam
+    my @sortbam_cmd = ("$exepath{'samtools'}");
+    push(@sortbam_cmd, "sort -o $sortedbam $bam"); 
+    my $run_sortbam_cmd = join(" ", @sortbam_cmd);
+    my @sortbam_run = run( command => $run_sortbam_cmd, verbose => $opt_V );
+    
+    if ($sortbam_run[0] == 0) {
+	
+	print STDERR "\n\tsamtools sort run failed with error ";
+	print STDERR "$sortbam_run[1]\n";
+    }	
+    
+    ## Create the index
+    my @idxbam_cmd = ("$exepath{'samtools'}");
+    push(@idxbam_cmd, "index $sortedbam"); 
+    my $run_idxbam_cmd = join(" ", @idxbam_cmd);
+    my @idxbam_run = run( command => $run_idxbam_cmd, verbose => $opt_V );
+    
+    if ($idxbam_run[0] == 0) {
+	
+	print STDERR "\n\tsamtools index run failed with error ";
+	print STDERR "$idxbam_run[1]\n";
+    }	
+
+    return($sortedbam);
+}
+
+
+
+###################################################################################
+## run_bedtools()
+## function to fun bedtools on the remapping file to estimate coverage
+## my $covfile = run_bedtools($refseq_length, $bam, $outdir)
+###################################################################################
+
+sub run_bedtools {
+
+    my $refseq_length = shift();
+    my $bamfile = shift();
+    my $odir = shift();
+
+    ## The bedtool command will be something like
+    ## bedtools genomecov [OPTIONS] -i <bed/gff/vcf> -g <genome>
+    ## it will add the option -d to calculate the average later on
+    
+    my $basename = "FinalAssembly.coverage.txt";
+    my $covfile = File::Spec->catfile($odir, $basename);
+
+    ## Build the command
+    my @bed_cmd = ("$exepath{'bedtools'}");
+    push(@bed_cmd, "genomecov");
+    push(@bed_cmd, "-d");
+    push(@bed_cmd, "-ibam $bamfile");
+    push(@bed_cmd, "-g $bamfile");
+    push(@bed_cmd, "> $covfile");
+
+    my $run_bed_cmd = join(" ", @bed_cmd);
+    my @bed_run = run( command => $run_bed_cmd, verbose => $opt_V );
+    
+    if ($bed_run[0] == 0) {
+	
+	print STDERR "\n\tBedtools genomecov run failed with error ";
+	print STDERR "$bed_run[1]\n";
+    }	
+
+    return($covfile);    
+}
+
+
+
+#################################################################################
+## make_covsum_file()
+## A function to parse the coverage file and produce a summary file with the
+## following structure:
+## FirstRow = WholeAssembly\t$GlobalMinCov\t$GlobalMaxCov\t$GlobalMeanCov\n.
+## NextRows = $CtgID\t$MinCov\t$MaxCov\t$MeanCov\n
+## make_covsum_file($covfile, $covsumm);
+#################################################################################
+
+sub make_covsum_file {
+
+    my $covfile = shift();
+    my $covsumm = shift();
+
+    ## First, parse the covfile
+    ## The idea is to store each nt into an array
+
+    my %covdata = ();
+    my @globaldata = ();
+    open my $cov_fh, '<', $covfile;
+    while(<$cov_fh>) {
+    
+	chomp($_);
+	my @line = (/\t/, $_);
+	push(@globaldata, $line[2]); 
+	if (exists $covdata{$line[0]}) {
+	
+	    push(@{$covdata{$line[0]}}, $line[2]);
+	}
+	else {
+	
+	    $covdata{$line[0]} = [$line[2]];
+	}    
+    }
+
+    ## Once the file has been processed it will calculate MinCov, MaxCov & MeanCov
+    my $g_min = min(@globaldata);
+    my $g_max = max(@globaldata);
+    my $g_mean = sum(@globaldata)/length(@globaldata);
+    my $line1 = join("\t", ("WholeAssembly", $g_min, $g_max, $g_mean)); 
+
+    ## Print it in a file
+    my $sum_fh, '>', $covsumm;
+    print $sum_fh "$line1\n";
+    print STDERR "\n\tCoverage Summary:\n\t\t$line1\n";
+
+    ## Now process the hash
+
+    foreach my $ctgid (sort(keys(%covdata))) {
+    
+	   my $c_min = min(@{$covdata{$ctgid}});
+	   my $c_max = max(@{$covdata{$ctgid}});
+	   my $c_mean = sum(@{$covdata{$ctgid}})/length(@{$covdata{$ctgid}});
+	   my $linep = join("\t", ($ctgid, $c_min, $c_max, $c_mean)); 
+	   print $sum_fh "$linep\n";
+    }    
+}
