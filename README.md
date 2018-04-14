@@ -83,13 +83,13 @@
   Arguments for External Tools
   ============================
   BuscoDiamonds can pass some arguments to some tools such as:
-     * Minia: -m <minia_arguments> (e.g. -m '-abundance-min=5')
-     * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
-     * Bowtie2: -w <bowtie2_arguments> (e.g. -w '--very-fast')
-       Note1: Threading options will be overwritten by -t <threads>
-       Note2: Imput/Output/Formating options are banned.
-       Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to 
-              recompile the tool using make k=64
+    * Minia: -m <minia_arguments> (e.g. -m '-abundance-min=5')
+    * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
+    * Bowtie2: -w <bowtie2_arguments> (e.g. -w '--very-fast')
+
+    Note1: Threading options will be overwritten by -t <threads>
+    Note2: Imput/Output/Formating options are banned.
+    Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to recompile the tool using make k=64
 
   Completeness Evaluation
   =======================
