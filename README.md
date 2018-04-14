@@ -1,10 +1,10 @@
 # BuscoDiamonds
 
   This program has several functions:
-   1- Evaluate the completeness of the gene space in a whole genome sequencing dataset that has not been assembled.
-   2- Reconstruct the gene/CDS/protein associated with the hits of the Gene Space reference.
-   3- Evaluate the duplication level of the analyzed Gene Space.
-   4- Estimate the genome coverage and heterozygosity based in the reconstruction of the evaluation Gene Space set.
+    1- Evaluate the completeness of the gene space in a whole genome sequencing dataset that has not been assembled.
+    2- Reconstruct the gene/CDS/protein associated with the hits of the Gene Space reference.
+    3- Evaluate the duplication level of the analyzed Gene Space.
+    4- Estimate the genome coverage and heterozygosity based in the reconstruction of the evaluation Gene Space set.
 
   We define the gene space as the gene population in the genome of a specific
   individual or accession. So, for example, the gene space for the Arabidopsis
