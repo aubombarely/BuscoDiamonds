@@ -1,6 +1,7 @@
 # BuscoDiamonds
 
   This program has several functions:
+
     1- Evaluate the completeness of the gene space in a whole genome sequencing dataset that has not been assembled.
     2- Reconstruct the gene/CDS/protein associated with the hits of the Gene Space reference.
     3- Evaluate the duplication level of the analyzed Gene Space.
@@ -24,6 +25,7 @@
   ...).
 
   The script uses two mandatory parameters:
+
     1- Reference protein sequence file (-r)
     2- A list of fastq short read files to map to the reference (-i). 
        Multiple files can be specified using the comma. The script DOES 
@@ -46,6 +48,7 @@
 
   Steps
   =====
+  ```
      +---- 
      | 1.1- Create the DIAMOND database.
      | 1.2- Align the reads against the DIAMOND database.
@@ -74,8 +77,8 @@
      | 4.5- Coverage analysis using Bedtools
      | 4.6- Variant calling usinf Freebayes to evaluate heterozygosity
      +-----
-     Note1: The number of assembly rounds (R) will be defined by the parameter
-           -a <assembly rounds>
+     Note1: The number of assembly rounds (R) will be defined by the parameter -a <assembly rounds>
+  ```
    
   Arguments for External Tools
   ============================
@@ -113,11 +116,13 @@
 
 
   Examples of running commands
-  # Basic command
-   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
-                 -o MySp_BuscoDiamonds2018 -l BuscoPlantProtein_lengths_cutoff
+  ============================
+  Basic command
+  ``` 
+   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq -o MySp_BuscoDiamonds2018 -l BuscoPlantProtein_lengths_cutoff
+  ```
 
-  # Filtering the hits with percentage of similarity below 60%
-   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
-                 -o MySp_BuscoDiamonds2018 -f ZI=60
-
+   Filtering the hits with percentage of similarity below 60%
+   ```
+   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq -o MySp_BuscoDiamonds2018 -f ZI=60
+   ```
