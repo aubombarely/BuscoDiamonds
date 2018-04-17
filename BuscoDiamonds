@@ -19,6 +19,8 @@ our $version = '0.1.1';
                     [-w <bowtie2_arguments>]
                     [-a <assembly_rounds>]   
                     [-b <busco_lineage_dir>]
+                    [-s <freebayes_arguments>]
+                    [-p <seqid_prefix>]
                     [-V]
 
 =head2 I<Flags:>
@@ -69,6 +71,14 @@ B<bowtie2_arguments>      Bowtie2 arguments as argument=value separated by comma
 =item -b
 
 B<busco_lineage_dir>      Directory with the BUSCO lineage
+
+=item -s
+
+B<freebayes_arguments>    Freebayes arguments as argument=value separated by commas
+
+=item -p
+
+B<seqid_prefix>           Prefix for the final sequence IDs (default: Bdmd)
 
 =item -V
 
@@ -174,6 +184,7 @@ B<help>                   Print the help
      * Minia: -m <minia_arguments> (e.g. -m '-abundance-min=5')
      * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
      * Bowtie2: -w <bowtie2_arguments> (e.g. -w '--very-fast')
+     * Freebayes: -s <freebayes_arguments> (e.g. -s '--no-complex,--min-coverage=5'
        Note1: Threading options will be overwritten by -t <threads>
        Note2: Imput/Output/Formating options are banned.
        Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to 
@@ -248,18 +259,24 @@ use Bio::Seq;
 use Bio::SimpleAlign;
 
 use Math::BigFloat;
-use List::Util;
+use List::Util qw(min max sum);
+
+## Create a hash to store the different reporting lines
+my @presults = ("Script=$0", "Version=$version");
+push(@presults, "CommandUsed=$0 @ARGV");
 
 our ($opt_r, $opt_i, $opt_o, $opt_f, $opt_t, $opt_l, $opt_m, $opt_a,
-     $opt_e, $opt_w, $opt_b, $opt_V, $opt_v, $opt_h);
-getopts("r:i:o:f:t:l:m:a:e:w:b:Vvh");
+     $opt_e, $opt_w, $opt_b, $opt_s, $opt_p, $opt_V, $opt_v, $opt_h);
+getopts("r:i:o:f:t:l:m:a:e:w:b:s:p:Vvh");
 if (!$opt_r && !$opt_i && !$opt_o && !$opt_f && !$opt_t && !$opt_l
-    && !$opt_m && !$opt_a && !$opt_e && !$opt_w && !$opt_b && 
-    !$opt_V && !$opt_v && !$opt_h) {
+    && !$opt_m && !$opt_a && !$opt_e && !$opt_w && !$opt_b && !$opt_s && 
+    !$opt_p && !$opt_V && !$opt_v && !$opt_h) {
     print "There are n\'t any tags. Print help\n\n";
     help();
 }
+
 if ($opt_h) {
+    
     help();
 }
 elsif ($opt_v) {
@@ -270,6 +287,7 @@ elsif ($opt_v) {
 
 my $date = `date`;
 chomp($date);
+push(@presults, "RunStartDate=$date"); 
 print STDERR "\n\n############################################################";
 print STDERR "\n## BuscoDiamonds Starts ($date) ##\n";
 print STDERR "############################################################\n\n";
@@ -291,6 +309,8 @@ print STDERR "\tPEP_REFSET file: $fastaref\n";
 my $fastaref_count = `grep -c '>' $fastaref`;
 chomp($fastaref_count); 
 print STDERR "\tPEP_REFSET has $fastaref_count sequences\n";
+
+push(@presults, "NumberOfReferenceSequences=$fastaref_count"); 
 
 ## Get the input sequences
 
@@ -318,6 +338,7 @@ foreach my $fqfile (split(/,/, $opt_i)) {
     }
 }
 print STDERR "\tTotal input reads: $total_input_reads\n\n";
+push(@presults, "NumberOfInputReads=$total_input_reads"); 
     
 my $outdir = $opt_o ||
     die("\nINPUT ARG. ERROR: -o <output_dir> argument was not supplied.\n\n");
@@ -420,6 +441,8 @@ else {
     }
 }
 
+my $seqprefix = $opt_p || 'Bdmd';
+print STDERR "\n\tFinal Sequence Prefix:\t$seqprefix\n";
 
 
 ## Check the executables
@@ -571,15 +594,20 @@ else {
     print STDERR "\n\tBUSCO evaluation DISABLED (use -b to enable this option)\n";
 }
 
+## Check the freebayes arguments
+my %fbayes_args = get_fbayes_args(\%exepath, $opt_s);
 
+print STDERR "\n\tFreebayes variant calling arguments:\n";
+foreach my $fb_arg (sort(keys(%fbayes_args))) {
 
+    print STDERR "\t\t$fb_arg\t$fbayes_args{$fb_arg}\n";
+}
 
 
 
 ##############################################################################
 ## Reduce the complexity by mapping
 ##############################################################################
-
 
 ## First run the mapping
 
@@ -631,6 +659,7 @@ else {
     ## run diamond
     run_diamond($dbname, \@fqlist, $outsam); 
 }
+push(@presults, "DiamondOutFile=$outsam");
 
 ## Check how many hits were found before any filtering
 
@@ -658,6 +687,10 @@ print STDERR "\t$hits_count reference sequences have one or more hits.\n";
 print STDERR "\t$reads_count reads have one or more hits.\n";
 print STDERR "\t$total_hits total hits were counted.\n";
 
+push(@presults, "NumberOfReferenceSequencesDiamondHits=$hits_count");
+push(@presults, "NumberOfInputReadsWithDiamondHits=$reads_count");
+push(@presults, "NumberOfTotalDiamondHits=$total_hits");
+
 ## Filtering the output based in the tags
 
 print_subheader("1.3- Filtering the Diamond output.");
@@ -680,12 +713,19 @@ else {
 	print STDERR "\t$hitsc reference sequences have one or more hits.\n";
 	print STDERR "\t$readsc reads have one or more hits.\n";
 	print STDERR "\t$th total hits were counted.\n";
+	push(@presults, "DiamondOutFilter=Enabled");
+	push(@presults, "DiamondOutFilteredFile=$outsam_f");
+	push(@presults, "NumberOfReferenceSequencesDiamondFilteredHits=$hitsc");
+	push(@presults, "NumberOfInputReadsWithDiamondFilteredHits=$readsc");
+	push(@presults, "NumberOfTotalDiamondFilteredHits=$th");
+
     }
     else {
     
 	## No filter was set up
 	$outsam_f = $outsam;
 	print STDERR "\tNo filter was set up. Skipping step.\n";
+	push(@presults, "DiamondOutFilter=Disabled");
     }
 }
 
@@ -704,13 +744,22 @@ else {
     calculate_mapping_coverage($outsam, $fastaref, $outcov);
     print STDERR "\tCalculate mapping coverage complete.\n";
 }
+push(@presults, "DiamondMappingCoverageFile=$outcov");
 
 my $repfile = File::Spec->catfile($d01dir, "DiamondMapping.CompSummary.txt");
+push(@presults, "DiamondMappingCompletenessFullTableFile=$repfile");
+
 my %mapcomp_hr = estimate_map_completeness($outcov, \%grouplen_std, $repfile);
 
 my $reportfile = File::Spec->catfile($d01dir, "DiamondMapping.PepRefSummary.txt");
 
 print_peprefset_report(\%mapcomp_hr, $reportfile);
+push(@presults, "DiamondMappingCompletenessReportFile=$reportfile");
+
+my $complsum = `grep "C:" $reportfile `;
+chomp($complsum);
+$complsum =~ s/^\s+//; 
+push(@presults, "DiamondMappingCompletenessShortReport=$complsum");
 
 ## Once the completeness has been evaluated, it will get the seed reads to perform
 ## an initial de-novo assembly
@@ -737,6 +786,11 @@ else {
     print STDERR "\t$hits_fname file found. Skipping step.\n";
 }
 ## Once the list has been created it will run seqtk to pre-select the reads
+my $selectedhits = `wc -l $hits_fname`;
+chomp($selectedhits);
+$selectedhits =~ s/\s+.+//;
+push(@presults, "PreselectedReadIDs=$selectedhits");
+
 
 my $fqfname = File::Spec->catfile($d04dir, "DndHitsReadSet.fq");
 
@@ -758,6 +812,10 @@ else {
     print STDERR "\t$fqfname file found. Skipping step.\n";
 }
 
+my $selseqcount_at = `seqtk seq -A $fqfname | grep -c "^>"`;
+chomp($selseqcount_at);
+push(@presults, "PreselectedReadFile=$fqfname");
+push(@presults, "PreselectedReadSequences=$selseqcount_at");
 
 
 
@@ -795,13 +853,17 @@ while($cur_rd <= $assembly_rounds) {
     my $ctgfile = File::Spec->catfile($d05dir_R, "MergedMiniaAssembly.contigs.fa");
     if (-e $ctgfile) {
     
-	print STDERR "\n\t$ctgfile Minia contig file found. Skipping step.\n";
+	print STDERR "\t$ctgfile Minia contig file found. Skipping step.\n";
     }
     else {
     
 	$ctgfile = run_minia($readfile, $d05dir_R, \%minia_args);
 	print STDERR "\n\tMinia assembly has been performed\n";
     }
+    push(@presults, "MiniaContigRound".$cur_rd."File=$ctgfile");
+    my $ctg_n = `grep -c "^>" $ctgfile`;
+    chomp($ctg_n);
+    push(@presults, "NumberOfContigForMiniaRound".$cur_rd."=$ctg_n");
 
     ####### 2- CONTIG EXTENSION ##################################################
     
@@ -810,13 +872,17 @@ while($cur_rd <= $assembly_rounds) {
     my $extfile = File::Spec->catfile($d05dir_R, "MergedExtendedContigs.fa");
     if (-e $extfile) {
     
-	print STDERR "\n\t$extfile extended contig file found. Skipping step.\n";
+	print STDERR "\t$extfile extended contig file found. Skipping step.\n";
     }
     else {
     
 	$extfile = run_mapsembler($ctgfile, \@fqlist, $d05dir_R, \%mapbler_args);
 	print STDERR "\n\tMapsembler extension has been performed\n";
     }
+    push(@presults, "ContigExtensionRound".$cur_rd."File=$extfile");
+    my $ext_n = `grep -c "^>" $extfile`;
+    chomp($ext_n);
+    push(@presults, "NumberOfExtendedContigsForRound".$cur_rd."=$ext_n");
     
     ####### 3- MAPPING READS ##################################################
     
@@ -825,13 +891,17 @@ while($cur_rd <= $assembly_rounds) {
     my $mapfile = File::Spec->catfile($d05dir_R, "MergedMappedReads.sam");
     if (-e $mapfile) {
     
-	print STDERR "\n\t$mapfile mapped reads file found. Skipping step.\n";
+	print STDERR "\t$mapfile mapped reads file found. Skipping step.\n";
     }
     else {
     
 	$mapfile = run_readmap($extfile, \@fqlist, $d05dir_R, \%bwt_args);
 	print STDERR "\n\tMapping reads to the contigs has been performed\n";
     }
+    push(@presults, "ReadRemappingRound".$cur_rd."File=$mapfile");
+    my $map_n = `grep -v "#" $mapfile | wc -l`;
+    chomp($map_n);
+    push(@presults, "NumberOfReadsRemappedRound".$cur_rd."=$map_n");
 
     ####### 4- READ EXTRACTION ##################################################
     
@@ -840,7 +910,7 @@ while($cur_rd <= $assembly_rounds) {
     $readfile = File::Spec->catfile($d05dir_R, "MergedExtractedReads.fastq");
     if (-e $readfile) {
     
-	print STDERR "\n\t$readfile reads file found. Skipping step.\n";
+	print STDERR "\t$readfile reads file found. Skipping step.\n";
     }
     else {
     
@@ -861,7 +931,7 @@ my $finalctgs_sz = '';
 
 if (-e $finalctgs) {
     
-    print STDERR "\n\tFinal Minia contig file ($finalctgs) found. Skipping step.\n";
+    print STDERR "\tFinal Minia contig file ($finalctgs) found. Skipping step.\n";
 }
 else {
     
@@ -908,6 +978,10 @@ while(readdir $d06dir_dh) {
 
 my $contigs_c = scalar(keys(%fcontigs));
 
+## Define the new names for the formated files
+my $f_assembly =  File::Spec->catfile($d05dir, "FinalAssembly.contigs.fa");
+my $fa_sizes = File::Spec->catfile($d05dir, "FinalAssembly.contigs.sizes.txt");
+
 if ($contigs_c > 0) {
 
     print STDERR "\t$contigs_c final contigs were found. Skipping step.\n";
@@ -919,12 +993,9 @@ else {
     ## At the same time it will be convinient to create a file will all the 
     ## sequences with the new names
     
-    my $f_assembly =  File::Spec->catfile($d05dir, "FinalAssembly.contigs.fa");
     my $fa_seqio = Bio::SeqIO->new( -file => ">$f_assembly", -format => 'Fasta' );
 
-    ## The will need also a file with the CtgID\tCtgLength for later on bedtools
-
-    my $fa_sizes = File::Spec->catfile($d05dir, "FinalAssembly.contigs.sizes.txt");
+    ## The will need also a file with the CtgID\tCtgLength for later on bedtools;
     open my $fasz_fh, '>', $fa_sizes;
 
     my $seqn = 0;
@@ -942,8 +1013,7 @@ else {
 	    my $boxname = "CtgBox" . sprintf("%02s", $box_count);
 	    $boxdir = File::Spec->catfile($d06dir_s01, $boxname);
 	    mkdir($boxdir);
-	}
-	
+	}	
 	
 	## We do not care about IDs, so we will re-name the scaffolds with
 	## the same name than the file.
@@ -967,13 +1037,17 @@ else {
 	    $boxn = 0;
 	    $box_count++;
 	}
-    }
-
-    $finalctgs = $f_assembly;
-    $finalctgs_sz = $fa_sizes;
+    } 
 
     print STDERR "\n\t$seqn sequence files have been created";
 }
+## Change the names
+$finalctgs = $f_assembly;
+$finalctgs_sz = $fa_sizes;
+push(@presults, "FinalAssemblyFile=$finalctgs");
+my $fctg_n = `grep -c "^>" $finalctgs`;
+chomp($fctg_n);
+push(@presults, "NumberOfContigForFinalAssembly=$fctg_n");
 
 
 print_subheader("3.2- Performing Augustus prediction");
@@ -1008,7 +1082,7 @@ else {
     
     %augustus_out = run_augustus(\%fcontigs, $d06dir_s02, $threads);
     $aug_c = scalar(keys(%augustus_out));
-    print STDERR "\n\t$aug_c Augustus files have been produced.\n";
+    print STDERR "\t$aug_c Augustus files have been produced.\n";
 }
 
 print_subheader("3.3- Parsing the Augustus output");
@@ -1017,6 +1091,22 @@ my $d06dir_s03 = dmd_mkdir($d06dir, "03_GeneModels");
 
 my ($gfffile, $cdsfile, $pepfile) = parse_augustus(\%augustus_out, $d06dir_s03);
 
+## Extract the information from the files
+push(@presults, "AugustusGFFFile=$gfffile");
+push(@presults, "AugustusCDSFile=$cdsfile");
+push(@presults, "AugustusPEPFile=$pepfile");
+my $ctgwp = `grep -v "#" $gfffile | cut -f1 | sort -u | wc -l`;
+chomp($ctgwp);
+my $gene_n = `cut -f3 $gfffile | grep -c gene`;
+chomp($gene_n);
+push(@presults, "NumberOfContigsWithPredictedGenes=$ctgwp");
+push(@presults, "NumberOfPredictedGenes=$gene_n");
+my $cds_n = `grep -c "^>" $cdsfile`;
+chomp($cds_n);
+push(@presults, "NumberOfPredictedCDS=$cds_n");
+my $pep_n = `grep -c "^>" $pepfile`;
+chomp($pep_n);
+push(@presults, "NumberOfPredictedPEP=$pep_n");
 
 ##################################################################################
 ## EVALUATION
@@ -1043,24 +1133,44 @@ my %busco_args_g = (
     '--cpu'          => $threads
     );
 
-
+my $gbusco_sum = '';
 my $gbusco_dir = '';
 if ($opt_b) {
 
     my $exp_gbuscodir = File::Spec->catfile($d07dir_s01, "run_BUSCO_genome");
     if (-d $exp_gbuscodir) {
 	
-	print STDERR "\n\t$exp_gbuscodir directory found. Skipping step.\n";
+	print STDERR "\t$exp_gbuscodir directory found. Skipping step.\n";
 	$gbusco_dir = $exp_gbuscodir;
     }
     else {
 	
 	$gbusco_dir = run_busco($finalctgs, \%busco_args_g, $d07dir_s01);
     }
+
+    my $gsum = File::Spec->catfile($gbusco_dir, "short_summary_BUSCO_genome.txt");
+    open my $gsum_fh, '<', $gsum;
+
+    while(<$gsum_fh>) {
+    
+	chomp($_);
+	if ($_ =~ /^\s+(C:.+)$/) {
+	 
+	    $gbusco_sum = $1;
+	    print STDERR "\n\tBUSCO genome summary:\n\t$gbusco_sum\n";
+	}
+    }
+    push(@presults, "BuscoGenomeEvaluation=Enabled");
+    push(@presults, "BuscoGenomeShortSummaryFile=$gsum");
+    my $gbuscosum = `grep "C:" $gsum `;
+    chomp($gbuscosum);
+    $gbuscosum =~ s/^\s+//; 
+    push(@presults, "BuscoGenomeShortReport=$gbuscosum");
 }
 else {
 
-    print STDERR "\n\tBUSCO analysis disable. Skipping step.\n";
+    print STDERR "\n\tBUSCO analysis disabled. Skipping step.\n";
+    push(@presults, "BuscoGenomeEvaluation=Disabled");
 }
 
 print_subheader("4.2- BUSCO run on the predicted proteins");
@@ -1073,24 +1183,69 @@ my %busco_args_p = (
     '--cpu'          => $threads
     );
 
+my %busco_equiv = ();
+
+my $pbusco_sum = '';
 my $pbusco_dir = '';
 if ($opt_b) {
 
     my $exp_pbuscodir = File::Spec->catfile($d07dir_s02, "run_BUSCO_proteins");
     if (-d $exp_pbuscodir) {
 	
-	print STDERR "\n\t$exp_pbuscodir directory found. Skipping step.\n";
+	print STDERR "\t$exp_pbuscodir directory found. Skipping step.\n";
 	$pbusco_dir = $exp_pbuscodir;
     }
     else {
 	
 	$pbusco_dir = run_busco($pepfile, \%busco_args_p, $d07dir_s02);
     }
+
+    ## Get the BUSCO summary
+    my $bsum = File::Spec->catfile($pbusco_dir, "short_summary_BUSCO_proteins.txt");
+    open my $bsum_fh, '<', $bsum;
+    while(<$bsum_fh>) {
+    
+	chomp($_);
+	if ($_ =~ /^\s+(C:.+)$/) {
+	
+	    $pbusco_sum = $1;
+	    print STDERR "\n\tBUSCO protein summary:\n\t$pbusco_sum\n";
+	}
+    }
+
+    push(@presults, "BuscoProteinEvaluation=Enabled");
+    push(@presults, "BuscoProteinShortSummaryFile=$bsum");
+    my $bbuscosum = `grep "C:" $bsum `;
+    chomp($bbuscosum);
+    $bbuscosum =~ s/^\s+//; 
+    push(@presults, "BuscoproteinShortReport=$bbuscosum");
+
+    ## At this point it will read the full_table_BUSCO_proteins.tsv to assign 
+    ## GeneID to BuscoIDS
+
+    my $bustab = File::Spec->catfile($pbusco_dir, "full_table_BUSCO_proteins.tsv");
+    open my $bustab_fh, '<', $bustab;
+    while(<$bustab_fh>) {
+    
+	chomp($_);
+	if ($_ !~ /^#/) {
+	
+	    my @line = split(/\t/, $_);
+	    if ($line[2]) {
+		$busco_equiv{$line[2]} = $line[0];
+	    }
+	}
+    }
 }
 else {
 
-    print STDERR "\n\tBUSCO analysis disable. Skipping step.\n";
+    print STDERR "\n\tBUSCO analysis disabled. Skipping step.\n";
+    push(@presults, "BuscoProteinEvaluation=Enabled");
 }
+
+
+
+
 
 ## Then, it will remap the reads, change to bam, sort and use for bedtools 
 ## (genomecov) and for freebayes to call SNPs
@@ -1102,7 +1257,7 @@ my $d07dir_s03 = dmd_mkdir($d07dir, "03_ReadRemappingEvaluation");
 my $remapfile = File::Spec->catfile($d07dir_s03, "FinalCtgsMappedReads.sam");
 if (-e $remapfile) {
     
-    print STDERR "\n\t$remapfile mapped reads file found. Skipping step.\n";
+    print STDERR "\t$remapfile mapped reads file found. Skipping step.\n";
 }
 else {
     
@@ -1116,7 +1271,7 @@ else {
 my $sortedbam = File::Spec->catfile($d07dir_s03, "FinalCtgsMappedReads.sorted.bam");
 if (-e $sortedbam) {
     
-    print STDERR "\n\t$sortedbam Sorted Bam file found. Skipping step.\n";
+    print STDERR "\t$sortedbam Sorted Bam file found. Skipping step.\n";
 }
 else {
     
@@ -1131,7 +1286,7 @@ my $covsumm = File::Spec->catfile($d07dir_s03, "SummaryGenomeCoverage.txt");
 
 if (-e $covfile) {
     
-    print STDERR "\n\t$covfile genome coverage file found. Skipping step.\n";
+    print STDERR "\t$covfile genome coverage file found. Skipping step.\n";
 }
 else {
 
@@ -1144,13 +1299,128 @@ else {
 
     make_covsum_file($covfile, $covsumm);
 }
+push(@presults, "CoverageEvaluationFile=$covsumm");
 
+print_subheader("4.5- Calling self-variants");
 
+my $vcffile = File::Spec->catfile($d07dir_s03, "FinalAssembly.SelfmapVariants.vcf");
+if (-e $vcffile) {
+    
+    print STDERR "\t$vcffile self-variant file file found. Skipping step.\n";
+}
+else {
+    
+    $vcffile = run_freebayes($finalctgs, $sortedbam, $d07dir_s03, \%fbayes_args);
+    print STDERR "\n\tSelf-variant calling has been performed\n";    
+}
 
+print_subheader("4.6- Analyzing self-variants");
 
+## The analysis of the self variants will produce a sumary file  
+## with the following columns:
+## |SeqID|SeqType|BuscoID|MeanCov|Het|Hom|SNP|INS|DEL|MNP|Complex|
+## On SeqTypes the possible values will be:
+##  * Assembly
+##  * Contig
+##  * Gene
+##  * FullTranscript
+##  * SumIntrons
+## It will retrieve the WholeAssembly stat to estimate the genome heterozygosity
+## at the end of the catch
+ 
+my $vafile = File::Spec->catfile($d07dir_s03, "SummaryGenomeVariants.txt");
+my $globalstats = '';
+if (-e $vafile) {
+    
+    print STDERR "\t$vafile variant summary file file found. Skipping step.\n";
+    $globalstats = `grep WholeAssembly $vafile`;
+}
+else {
+    
+    $vafile = analyze_vcf($vcffile, $covsumm, $gfffile, \%busco_equiv, $d07dir_s03);
+    print STDERR "\n\tAnalysis of the VCF file has been performed\n";
+    $globalstats = `grep WholeAssembly $vafile`;
+}
+chomp($globalstats);
+push(@presults, "VariantEvaluationFile=$vafile");
+
+my %gvar_stats = ();
+my $g = 0;
+my @gkeys = ("SeqID", "SeqType", "Length", "MeanCov", "Het", "Hom", "SNP", "INS", 
+	     "DEL", "MNP", "Complex");
+foreach my $gstat (split(/\t/, $globalstats)) {
+
+    $gvar_stats{$gkeys[$g]} = $gstat;
+    $g++;
+}
+
+## Print the summary
+print STDERR "\n\tAssembly Stats Summary:\n";
+my $length_mb = Math::BigFloat->new($gvar_stats{Length}/1000000)->bfround(-3);
+print STDERR "\t\tTotal assembly length:\t$length_mb Mb\n";
+print STDERR "\t\tMean coverage:\t$gvar_stats{MeanCov} X\n";
+push(@presults, "TotalAssemblySize(Mb)=$length_mb");
+push(@presults, "MeanSequencingCoverage(X)=$gvar_stats{MeanCov}");
+
+my $bphet_obj = Math::BigFloat->new($gvar_stats{Het}*100/$gvar_stats{Length});
+my $bphet = $bphet_obj->bfround(-3);
+print STDERR "\t\tHeterozygosity:\t$bphet heterozygous variants/100 bp\n";
+push(@presults, "Heterozygosity(Per100bp)=$bphet");
+
+my %busco_reve = ();
+my ($single, $duplicated) = (0, 0);
+foreach my $geneid (sort(keys(%busco_equiv))) {
+
+    if (exists $busco_reve{$busco_equiv{$geneid}}) {
+    
+	$busco_reve{$busco_equiv{$geneid}}++;
+	$duplicated++;
+    }
+    else {
+    
+	$busco_reve{$busco_equiv{$geneid}} = 1;
+	$single++;
+    }
+}
+
+my $dupgenes = Math::BigFloat->new($duplicated*100/$single)->bfround(-3);
+print STDERR "\t\tGene duplication percentage:\t$dupgenes %\n";
+push(@presults, "DuplicatedGenes(%)=$dupgenes");
+
+##################################################################################
+## Final steps
+## * Assign reference sequence IDs to the rebuild CDS/proteins
+##################################################################################
+
+print_header("5) Assigning RefSeq Set IDs to reconstructed Genes/Proteins");
+my $d08dir = dmd_mkdir($outdir, "08_FinalResults");
+
+my $finalcds = File::Spec->catfile($d08dir, "BuscoDMD_CDS.fasta");
+my $finalpep = File::Spec->catfile($d08dir, "BuscoDMD_PEP.fasta");
+
+print_subheader("5.1- Generating Fasta files");
+
+reassign_seqids($cdsfile, $finalcds, \%busco_equiv, $seqprefix);
+reassign_seqids($pepfile, $finalpep, \%busco_equiv, $seqprefix);
+push(@presults, "FinalCDSFile=$finalcds");
+push(@presults, "FinalPEPFile=$finalpep");
+
+print_subheader("5.2- Generating run summary file");
 
 $date = `date`;
 chomp($date);
+push(@presults, "RunEndDate=$date");
+
+my $runsummary = File::Spec->catfile($d08dir, "BuscoDMD_RunSummary.txt");
+open my $runs_fh, '>', $runsummary;
+foreach my $pline (@presults) {
+   
+    print $runs_fh "$pline\n"; 
+}
+
+print STDERR "\tRun summary file: $runsummary\n";
+
+
 print STDERR "\n\n############################################################";
 print STDERR "\n## BuscoDiamonds Ends ($date)   ##\n";
 print STDERR "############################################################\n\n";
@@ -1296,7 +1566,7 @@ sub print_subheader {
     my $length = length($message);
     my $subline = "-" x $length; 
  
-    print STDERR "\n\t$message\n\t$subline\n\n";
+    print STDERR "\n   $message\n   $subline\n\n";
 }
 
 
@@ -2971,8 +3241,8 @@ sub make_covsum_file {
     while(<$cov_fh>) {
     
 	chomp($_);
-	my @line = (/\t/, $_);
-	push(@globaldata, $line[2]); 
+	my @line = split(/\t/, $_);
+	push(@globaldata, $line[2]);
 	if (exists $covdata{$line[0]}) {
 	
 	    push(@{$covdata{$line[0]}}, $line[2]);
@@ -2984,15 +3254,21 @@ sub make_covsum_file {
     }
 
     ## Once the file has been processed it will calculate MinCov, MaxCov & MeanCov
+
     my $g_min = min(@globaldata);
     my $g_max = max(@globaldata);
-    my $g_mean = sum(@globaldata)/length(@globaldata);
-    my $line1 = join("\t", ("WholeAssembly", $g_min, $g_max, $g_mean)); 
+    my $g_len = scalar(@globaldata);
+    my $g_mean_nr = sum(@globaldata)/$g_len;
+    my $g_mean = Math::BigFloat->new($g_mean_nr)->bfround(-2);
+
+    my $line1 = join("\t", ("WholeAssembly", $g_len, $g_min, $g_max, $g_mean)); 
 
     ## Print it in a file
-    my $sum_fh, '>', $covsumm;
-    print $sum_fh "$line1\n";
-    print STDERR "\n\tCoverage Summary:\n\t\t$line1\n";
+    open my $sum_fh, '>', $covsumm;
+    print $sum_fh "##SeqID\tLength\tMinCov\tMaxCov\tMeanCov\n$line1\n";
+    print STDERR "\n\tCoverage Summary:\n\t\tMin. Coverage:\t$g_min\n";
+    print STDERR "\t\tMax. Coverage:\t$g_max\n";
+    print STDERR "\t\tMean Coverage:\t$g_mean\n";
 
     ## Now process the hash
 
@@ -3000,8 +3276,442 @@ sub make_covsum_file {
     
 	   my $c_min = min(@{$covdata{$ctgid}});
 	   my $c_max = max(@{$covdata{$ctgid}});
-	   my $c_mean = sum(@{$covdata{$ctgid}})/length(@{$covdata{$ctgid}});
-	   my $linep = join("\t", ($ctgid, $c_min, $c_max, $c_mean)); 
+	   my $c_len = scalar(@{$covdata{$ctgid}}); 
+	   my $c_mean_nr = sum(@{$covdata{$ctgid}})/$c_len;
+	   my $c_mean = Math::BigFloat->new($c_mean_nr)->bfround(-2);
+	   my $linep = join("\t", ($ctgid, $c_len, $c_min, $c_max, $c_mean)); 
 	   print $sum_fh "$linep\n";
     }    
+}
+
+
+###############################################################################
+## get_fbayes_args();
+## function to parse and check freebayes args
+## my %fbayes_args = get_fbayes_args(\%exepath, $opt_s);
+###############################################################################
+
+sub get_fbayes_args {
+
+    my %exepath = %{shift()}; 
+    my $fbayes_argsline = shift();
+    my %fbayes_args = ();
+
+    ## There are some options that should not be used because it will 
+    ## produce problems downstream to process the output
+
+    my %fbayes_ban = (
+	'-b'                              => 1,
+	'--bam'                           => 1,
+	'-L'                              => 1,
+	'--bam-list'                      => 1,
+	'-c'                              => 1,
+	'--stdin'                         => 1,
+	'-f'                              => 1,
+	'--fasta-reference'               => 1,
+	'-t'                              => 1,
+	'--targets'                       => 1,
+	'-s'                              => 1,
+	'--samples'                       => 1,
+	'--populations'                   => 1,
+	'-A'                              => 1,
+	'--cnv-map'                       => 1,
+	'-v'                              => 1,
+	'--vcf'                           => 1,
+	'--gvcf'                          => 1,
+	'--gvcf-chunk'                    => 1,
+	'-@'                              => 1,
+	'--variant-input'                 => 1,
+	'-l'                              => 1,
+	'--only-use-input-alleles'        => 1,
+	'--haplotype-basis-alleles'       => 1,
+	'--report-all-haplotypes-alleles' => 1,
+	'--report-monomorphic'            => 1,
+	'-P'                              => 1,
+	'--pvar'                          => 1,
+	'--strict-vcf'                    => 1
+	);
+
+    if ($fbayes_argsline) {
+
+	my $fbayes_h = "$exepath{freebayes} -h ";
+	$fbayes_h .= "| sed -r 's/^\\s+//' | grep '^-' | sed -r 's/\\s+.+//'";
+	my @fbayes_h_run = run( command => $fbayes_h );
+	
+	my %perm_fbayes = ();
+	foreach my $fbayes_arg (split(/\n/, $fbayes_h_run[3]->[0])) {
+		       
+	    $perm_fbayes{$fbayes_arg} = 1;
+	}
+
+	foreach my $fb_argline (split(/,/, $fbayes_argsline)) {
+    
+	    if ($fb_argline =~ m/^(-.+?)=?(\w*)$/) {
+	
+		my $fb_arg = $1;
+		my $fb_val = $2;
+		unless (exists $perm_fbayes{$fb_arg}) {
+	    
+		    my $error = "$fb_arg is not freebayes option";
+		    die("\nFREEBAYES OPTION ERROR: $error.\n");
+		}
+		else {
+	    
+		    if (exists $fbayes_ban{$fb_arg}) {
+			
+			my $warn = "Freebayes argument $fb_arg can not be used.";
+			warn("\nWARNING: $warn\n");
+		    }
+		    else {
+			
+			$fbayes_args{$fb_arg} = $fb_val;
+		    }
+		}
+	    }
+	}
+    }
+    
+    return(%fbayes_args);
+}
+
+
+
+###################################################################################
+## run_freebayes()
+## function to fun freebayes and call the variants
+## my $vcffile = run_freebayes($refseq, $bam, $outdir, \%fbayes_args)
+###################################################################################
+
+sub run_freebayes {
+
+    my $refseq = shift();
+    my $bamfile = shift();
+    my $odir = shift();
+    my %fbayes = %{shift()};
+
+    ## 
+    ## 
+    
+    my $basename = "FinalAssembly.SelfmapVariants.vcf";
+    my $vcffile = File::Spec->catfile($odir, $basename);
+
+    ## Build the command
+    my @fbayes_cmd = ("$exepath{'freebayes'}");
+    push(@fbayes_cmd, "--bam $bamfile");
+    push(@fbayes_cmd, "--fasta-reference $refseq");
+    push(@fbayes_cmd, "--vcf $vcffile");
+
+    foreach my $fbayes_arg (sort(keys(%fbayes))) {
+    
+	push(@fbayes_cmd, "$fbayes_arg $fbayes{$fbayes_arg}");
+    }
+
+    my $run_fbayes_cmd = join(" ", @fbayes_cmd);
+    my @fbayes_run = run( command => $run_fbayes_cmd, verbose => $opt_V );
+    
+    if ($fbayes_run[0] == 0) {
+	
+	print STDERR "\n\tFreebayes run failed with error ";
+	print STDERR "$fbayes_run[1]\n";
+    }	
+
+    return($vcffile);    
+}
+
+
+
+##################################################################################
+## analyze_vcf()
+## A function to analyze the stats of the VCF file
+## The analysis of the self variants will produce a sumary file named as
+##  SummaryGenomeVariants.txt
+## with the following columns:
+## |SeqID|SeqType|BuscoID|Lenght|MeanCov|Het|Hom|SNP|INS|DEL|MNP|Complex|
+## On SeqTypes the possible values will be:
+##  * Assembly
+##  * Contig
+##  * Gene
+##  * FullTranscript
+##  * SumIntrons
+## $vafile = analyze_vcf($vcffile, $covsumm, $gfffile, \%busco_equiv, $d07dir_s03);
+#################################################################################
+ 
+sub analyze_vcf {
+    
+    my $vcffile = shift();
+    my $covsumm = shift();
+    my $gfffile = shift(); 
+    my %busco_equiv = %{shift()};
+    my $odir = shift();
+    
+    ## The function will follow several steps:
+    ## 1- Get the stats for the assembly and each contig
+    
+    my %varsum = (
+	'WholeAssembly' => {
+	    type    => 'assembly',
+	    length  => 0, 
+	    het     => 0, 
+	    hom     => 0, 
+	    snp     => 0, 
+	    ins     => 0, 
+	    del     => 0,
+	    mnp     => 0, 
+	    complex => 0
+	}
+	);
+    
+    open my $vcf_fh, '<', $vcffile;
+    while(<$vcf_fh>) {
+    
+	chomp($_); 
+	if ($_ =~ m/^#/) {
+	
+	    if ($_ =~ m/^##contig=<ID=(.+),length=(.+)>$/) {
+	    
+		$varsum{$1} = {
+		    type    => 'contig',
+		    length  => $2, 
+		    het     => 0, 
+		    hom     => 0, 
+		    snp     => 0, 
+		    ins     => 0, 
+		    del     => 0,
+		    mnp     => 0, 
+		    complex => 0,
+		    MeanCov => 0
+		};
+		$varsum{'WholeAssembly'}->{length} += $2;
+	    }
+	}
+	else {
+	
+	    my @line = split(/\t/, $_);
+	    my $seqid = $line[0];
+	    my @geno = split(/:/, $line[9]);  
+
+	    my %info = ();
+	    foreach my $infoline (split(/;/, $line[7])) {
+	    
+		my @infopairs = split(/=/, $infoline);
+		$info{$infopairs[0]} = $infopairs[1];
+	    }
+
+	    ## It will count only biallelic variants ignoring anything that has
+	    ## a comma in the type
+
+	    if ($info{TYPE} !~ m/,/) {
+
+		## Ignore if the genotype is 0/0
+	    
+		unless ($geno[0] eq "0/0") {
+
+		    if ($geno[0] eq "0/1") {
+					
+			$varsum{$seqid}->{het}++;
+			$varsum{'WholeAssembly'}->{het}++;
+		    }
+		    else {
+			
+			$varsum{$seqid}->{hom}++;
+			$varsum{'WholeAssembly'}->{hom}++;
+		    }
+		    
+		    $varsum{$seqid}->{$info{TYPE}}++;
+		    $varsum{'WholeAssembly'}->{$info{TYPE}}++;
+		}
+	    }
+	}
+    }
+
+    ## At this point the assembly and the contigs will have the variant information
+    ## We will parse now the summary coverage
+
+    open my $covsum_fh, '<', $covsumm;
+    while(<$covsum_fh>) {
+    
+	chomp($_);
+	if ($_ !~ m/^#/) {
+	
+	    my @line = split(/\t/, $_); 
+	    $varsum{$line[0]}->{MeanCov} = $line[-1];
+	}
+    }
+
+    ## Once we have added the mean, we will have ready the non annotated 
+    ## variants. We will get the annotated ones using bedtools between the GFF and
+    ## the VCF. The program will parse the output
+
+    my $intbedfile = File::Spec->catfile($odir, "FinalAssembly.GFFvsVCF.bed");
+
+    ## Build the command
+    my @intbed_cmd = ("$exepath{'bedtools'}");
+    push(@intbed_cmd, "intersect");
+    push(@intbed_cmd, "-a $gfffile");
+    push(@intbed_cmd, "-b $vcffile");
+    push(@intbed_cmd, "-wao");
+    push(@intbed_cmd, "> $intbedfile");
+    
+    my $run_intbed_cmd = join(" ", @intbed_cmd);
+    my @intbed_run = run( command => $run_intbed_cmd, verbose => $opt_V );
+    
+    if ($intbed_run[0] == 0) {
+	
+	print STDERR "\n\tBedtools intersect run failed with error ";
+	print STDERR "$intbed_run[1]\n";
+    }	
+    
+    ## Once the command has been run, it will parse the output
+    ## It will keep:
+    ## gene,transcript,exon,intron
+    
+    open my $intbed_fh, '<', $intbedfile;
+    while(<$intbed_fh>) {
+    
+	chomp($_);
+	my @ln = split(/\t/, $_); 
+	
+	my %feats = ();
+	foreach my $featline (split(/;/, $ln[8])) {
+	
+	    my @featp = split(/=/, $featline); 
+	    $feats{$featp[0]} = $featp[1];
+	}
+
+	## Now it will check if there is an ID, and if does not it will create 
+	## one based in the parent data
+	
+	my $featid = ''; 
+	if ($feats{ID}) {
+	
+	    $featid = $feats{ID};
+	}
+	else {
+	
+	    $featid = $feats{Parent} . "-" . $ln[2];
+	}
+
+	my $feat_length = $ln[4] - $ln[3];
+
+	## Now it will check if exists the new featid and if it has a variant
+	unless (exists $varsum{$featid}) {
+			   	    
+	    ## Create an empty hash
+	    $varsum{$featid} = {
+		type    => $ln[2],
+		length  => $feat_length, 
+		het     => 0, 
+		hom     => 0, 
+		snp     => 0, 
+		ins     => 0, 
+		del     => 0,
+		mnp     => 0, 
+		complex => 0,
+		MeanCov => 'NA',
+	    };	    
+	}
+	else {
+	
+	    $varsum{$featid}->{length} += $feat_length;
+	}
+	
+	if ($ln[9] ne '0') {
+	    
+	    my @fgeno = split(/:/, $ln[18]);  
+	    
+	    my %finfo = ();
+	    foreach my $finfoline (split(/;/, $ln[16])) {
+		
+		my @finfopairs = split(/=/, $finfoline);
+		$finfo{$finfopairs[0]} = $finfopairs[1];
+	    }
+
+	    ## Add the het/hom
+	    if ($finfo{TYPE} !~ m/,/) {
+		
+		if ($fgeno[0] eq "0/1") {
+
+		    $varsum{$featid}->{het}++;
+		    $varsum{$featid}->{$finfo{TYPE}}++;
+		}
+		elsif ($fgeno[0] ne "0/0") {
+		    
+		    $varsum{$featid}->{hom}++;
+		    $varsum{$featid}->{$finfo{TYPE}}++;
+		}				
+	    }		
+	}    
+    }
+    
+    ## Once it has been parsed, it will print the output
+    my @psortlist = ('type', 'length', 'MeanCov', 'het', 'hom', 'snp', 'ins', 'del',
+		     'mnp', 'complex');
+    
+    my $sumfile = File::Spec->catfile($odir, "SummaryGenomeVariants.txt");
+    open my $sum_fh, '>', $sumfile;
+    my $phead = "#SeqID/FeatID\t" . join("\t", @psortlist);
+    print $sum_fh "$phead\n";
+
+    foreach my $sid (sort(keys(%varsum))) {
+    
+	my @pline = ($sid);
+	foreach my $pkey (@psortlist) {
+	
+	    push(@pline, $varsum{$sid}->{$pkey}); 
+	}
+	
+
+	my $pline = join("\t", @pline);
+	print $sum_fh "$pline\n";
+    }
+
+    return($sumfile); 
+}
+
+
+
+##################################################################################
+## reassign_seqids()
+## A function to select and rename the sequence
+## reassign_seqids($oldfasta, $newfasta, \%buscoequiv, $prefix)
+##################################################################################
+
+sub reassign_seqids {
+
+    my $oldfasta = shift();
+    my $newfasta = shift();
+    my %busco_equiv = %{shift()};
+    my $prefix = shift() || "";
+
+    my $oldseq_io = Bio::SeqIO->new( -file => "$oldfasta", -format => "Fasta" );
+    my $newseq_io = Bio::SeqIO->new( -file => ">$newfasta", -format => "Fasta" );
+
+    my $seq_n++;
+    my %copiesbusco = ();
+    while(my $seqobj = $oldseq_io->next_seq() ) {
+
+	my $seqid = $seqobj->id();
+	my $buscoid = $busco_equiv{$seqid};
+	
+	## Not all the reads exists in the BUSCO equiv
+	if (exists $busco_equiv{$seqid}) {
+
+	    if (exists $copiesbusco{$buscoid}) {
+    
+		$copiesbusco{$buscoid}++;
+	    }
+	    else {
+		
+		$copiesbusco{$buscoid} = 1;
+	    }
+	    my $busco_name = $prefix ."_". $buscoid . "_" . $copiesbusco{$buscoid};
+	    $seqobj->description($seqid);
+	    $seqobj->id($busco_name);
+	    $newseq_io->write_seq($seqobj);
+	    $seq_n++;
+	}
+    } 
+
+    print STDERR "\t$seq_n sequences have been printed in the file\n";
+    print STDERR "\t$newfasta\n\n";
 }
