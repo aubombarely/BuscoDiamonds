@@ -7,7 +7,7 @@
 
 =cut
 
-our $version = '0.1.1';
+our $version = '0.1.2';
 
 =head1 SYPNOSIS
 
@@ -67,7 +67,7 @@ B<mapssebler_arguments>   Mapsembler2 arguments as extremities:args;extend:args
 
 =item -w
 
-B<bowtie2_arguments>      Bowtie2 arguments as argument=value separated by commas
+B<bowtie2_arguments>      Bowtie2 arguments as arg=value separated by commas
 
 =item -b
 
@@ -75,7 +75,7 @@ B<busco_lineage_dir>      Directory with the BUSCO lineage
 
 =item -s
 
-B<freebayes_arguments>    Freebayes arguments as argument=value separated by commas
+B<freebayes_arguments>    Freebayes arguments as arg=value separated by commas
 
 =item -p
 
@@ -134,17 +134,17 @@ B<help>                   Print the help
   Prerrequisites
   ==============
    * Bioperl
-   * Diamond accessible from the path or as the env. variable DIAMOND_PATH
-   * Seqtk accessible from the path or as the env. variable SEQTK_PATH
-   * Minia accessible from the path or as the env. variable MINIA_PATH
-   * Bowtie2 accessible from the path or as the env. variable BOWTIE2_PATH
-   * Mapsembler2 accessible from the path or as the env. variable MAPSEMBLER_PATH
-   * Augustus accessible from the path or as the env. variable AUGUSTUS_PATH
-     Additionally the the Augustus config directory should be accessible as the
+   * Diamond accessible from the path or as env. variable DIAMOND_PATH
+   * Seqtk accessible from the path or as env. variable SEQTK_PATH
+   * Minia accessible from the path or as env. variable MINIA_PATH
+   * Bowtie2 accessible from the path or as env. variable BOWTIE2_PATH
+   * Mapsembler2 accessible from the path or as env. variable MAPSEMBLER_PATH
+   * Augustus accessible from the path or as env. variable AUGUSTUS_PATH
+     Additionally the the Augustus config directory should be accessible as
      environmental variable AUGUSTUS_CONFIG_PATH
-   * Samtools accessible from the path or as the env. variable SAMTOOLS_PATH
-   * Bedtools accessible from the path or as the env. variable BEDTOOLS_PATH 
-   * Freebayes accessible from the path or as the env. variable FREEBAYES_PATH
+   * Samtools accessible from the path or as env. variable SAMTOOLS_PATH
+   * Bedtools accessible from the path or as env. variable BEDTOOLS_PATH 
+   * Freebayes accessible from the path or as env. variable FREEBAYES_PATH
 
   Steps
   =====
@@ -186,10 +186,10 @@ B<help>                   Print the help
   Arguments for External Tools
   ============================
   BuscoDiamonds can pass some arguments to some tools such as:
-     * Minia: -m <minia_arguments> (e.g. -m '-abundance-min=5')
-     * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
-     * Bowtie2: -w <bowtie2_arguments> (e.g. -w '--very-fast')
-     * Freebayes: -s <freebayes_arguments> (e.g. -s '--no-complex,--min-coverage=5'
+   * Minia: -m <minia_args> (e.g. -m '-abundance-min=5')
+   * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
+   * Bowtie2: -w <bowtie2_args> (e.g. -w '--very-fast')
+   * Freebayes: -s <freebayes_args> (e.g. -s '--no-complex,--min-coverage=5')
        Note1: Threading options will be overwritten by -t <threads>
        Note2: Imput/Output/Formating options are banned.
        Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to 
@@ -200,17 +200,19 @@ B<help>                   Print the help
   BuscoDiamonds evaluates the completeness of the reference Gene Space using two
   different approaches:
 
-     A- Analyzing the reads that align with the protein model (e.g. BUSCO protein)
-        and calculating if they cover the length (+/- SD) of the protein model
-        at the step 1.5. 
+     A- Analyzing the reads that align with the protein model (e.g. BUSCO 
+        protein) and calculating if they cover the length (+/- SD) of the 
+        protein model at the step 1.5. 
         
         Because the assembly has not been performed yet, it will only estimate
         if the protein is represented in a "complete" or in a "fragmented" form.
-        Option -l <std_length_file> controls the SD values for the protein models.
+        Option -l <std_length_file> controls the SD values for the protein 
+        models.
+        
         If no option -l is supplied, it will use 10% of the protein length. No 
         expected score is used, but the Diamond hits can be filtered prior this 
         analysis with the -f option (e.g. -f 'ZI=60' to keep 60% of similarity 
-        or more). The results can be found at the DiamondMapping.PepRefSummary.txt
+        or more). The results can be found at DiamondMapping.PepRefSummary.txt
         file.
      
      B- BUSCO run over the assembled contigs (step 2.5) using the BUSCO mode 
@@ -222,8 +224,9 @@ B<help>                   Print the help
   ============================
   Sequence coverage evaluation is performed mapped the reads back to the contigs
   and running Bedtools genomecov on the bam files. The script will calculate
-  the minimum, maximum and mean for each contig and for the whole assembly (marked
-  as WholeAssembly) and report them in the FinalAssembly.coverage.txt file
+  the minimum, maximum and mean for each contig and for the whole assembly 
+  (marked as WholeAssembly) and report them in the FinalAssembly.coverage.txt 
+  file
 
   Heterozygosity
   ==============
@@ -240,8 +243,8 @@ B<help>                   Print the help
     DiamondMapping.CompSummary.txt   
      - Gene space evaluation with seven columns: GroupID, ExpectedLength, 
        ExpectedLengthSD (preset by -l option or the 10% of the ExpectedLength),
-       NumberOfReadHits, AaCoveredByOneOrMoreReads, AaCoveredByFiveOrMoreReads and
-       Tag classifying the coverage of the RefSeq.    
+       NumberOfReadHits, AaCoveredByOneOrMoreReads, AaCoveredByFiveOrMoreReads 
+       and Tag classifying the coverage of the RefSeq.    
     DiamondMapping.coverage.txt      
      - Mapping coverage file with one line per reference sequence. Each line has
        three columns: RefSeqID, RefSeqLength, MappingDepthByPosition 
@@ -272,14 +275,13 @@ B<help>                   Print the help
      - Kmer graphs for Minia assembly
     MergedMapsember2Extremities.fasta
      - Extremities for the Mapssembler2 run
-    MergedMapsember2Extend_k_K_c_C_t_T.fasta
+    MergedMapsember2Extend_k_K_c_C_t_2.fasta
      - Extended contigs for Mapssembler2 run where K=Kmer, C=Coverage and 
-       T=mode (2 for contigs). This file will be renamed to the file
-       MergedExtendedContigs.fa
+       This file will be renamed to the file MergedExtendedContigs.fa
     MergedExtendedContigs.*.bt2
      - Indexes for Bowtie2
     MergedMappedReads.sam
-     - Mapped reads to the MergedMapsember2Extend_k_K_c_C_t_T.fasta file
+     - Mapped reads to the MergedMapsember2Extend_k_K_c_C_t_2.fasta file
     MergedExtractedReads.fastq
      - Extracted reads from the MergedMappedRead.sam file  
   -------------------------------------------------------------------------
@@ -310,13 +312,13 @@ B<help>                   Print the help
     FinalAssembly.GFFvsVCF.bed
       - GFF/VCF intersect Bed file  (output of Bedtools insersect)
     SummaryGenomeCoverage.txt
-      - Summary with the sequencing coverage analysis (with 4 columns: ContigID, 
-        minimum coverage, Maximum coverage and mean coverage). The WholeAssembly
-        is printed in the second line.
+      - Summary with the sequencing coverage analysis (with 4 columns: 
+        ContigID, minimum coverage, Maximum coverage and mean coverage). 
+        The WholeAssembly is printed in the second line.
     SummaryGenomeVariants.txt
-      - Summary with the variants, with the following columns: SeqID/FeatID, type,
-        length, mean coverage/depth, heterozygous variants, homozygous variants,
-        SNPs, insertions, deletions, mnp and complex variants.
+      - Summary with the variants, with the following columns: SeqID/FeatID, 
+        type, length, mean coverage/depth, heterozygous variants, homozygous 
+        variants, SNPs, insertions, deletions, mnp and complex variants.
   -------------------------------------------------------------------------
   06_Finalresults: Directory with the final results
   - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -707,7 +709,7 @@ if ($opt_b) {
 }
 else {
 
-    print STDERR "\n\tBUSCO evaluation DISABLED (use -b to enable this option)\n";
+    print STDERR "\n\tBUSCO run DISABLED (use -b to enable this option)\n";
 }
 
 ## Check the freebayes arguments
@@ -867,18 +869,18 @@ push(@presults, "DiamondMappingCompletenessFullTableFile=$repfile");
 
 my %mapcomp_hr = estimate_map_completeness($outcov, \%grouplen_std, $repfile);
 
-my $reportfile = File::Spec->catfile($d01dir, "DiamondMapping.PepRefSummary.txt");
+my $report_f = File::Spec->catfile($d01dir, "DiamondMapping.PepRefSummary.txt");
 
-print_peprefset_report(\%mapcomp_hr, $reportfile);
-push(@presults, "DiamondMappingCompletenessReportFile=$reportfile");
+print_peprefset_report(\%mapcomp_hr, $report_f);
+push(@presults, "DiamondMappingCompletenessReportFile=$report_f");
 
-my $complsum = `grep "C:" $reportfile `;
+my $complsum = `grep "C:" $report_f `;
 chomp($complsum);
 $complsum =~ s/^\s+//; 
 push(@presults, "DiamondMappingCompletenessShortReport=$complsum");
 
-## Once the completeness has been evaluated, it will get the seed reads to perform
-## an initial de-novo assembly
+## Once the completeness has been evaluated, it will get the seed reads to 
+## perform an initial de-novo assembly
 
 print_subheader("1.5- Pre-selecting reads from Fastq files.");
 my $d04dir = dmd_mkdir($outdir, "02_ExtractedReads");
@@ -938,7 +940,7 @@ push(@presults, "PreselectedReadSequences=$selseqcount_at");
 
 
 
-###################################################################################
+###############################################################################
 ## ASSEMBLY
 ## The assembly process will be an iteractive process controlled by the number
 ## of assembly rounds. The assembly will be divided in the folowing steps:
@@ -947,7 +949,7 @@ push(@presults, "PreselectedReadSequences=$selseqcount_at");
 ##  3- Read mapping to the Mapsembler2 results
 ##  4- Read extraction from the mapping
 ##  5- Read re-assembly with Minia
-###################################################################################
+###############################################################################
 
 print_header("2) Performing de-novo assemblies");
 
@@ -960,16 +962,17 @@ while($cur_rd <= $assembly_rounds) {
 
     my $d05dir_R = dmd_mkdir($d05dir, "Assembly_Round" . $cur_rd);
     
-    ####### 1- MINIA ASSEMBLY ###################################################
+    ####### 1- MINIA ASSEMBLY #################################################
     
     print_subheader("2.1.".$cur_rd."- Minia assembly for round $cur_rd");
 
     ## It will check if exists the minia contigs file
 
-    my $ctgfile = File::Spec->catfile($d05dir_R, "MergedMiniaAssembly.contigs.fa");
+    my $ctgfile = File::Spec->catfile($d05dir_R, 
+				      "MergedMiniaAssembly.contigs.fa");
     if (-e $ctgfile) {
     
-	print STDERR "\t$ctgfile Minia contig file found. Skipping step.\n";
+	print STDERR "\t$ctgfile Minia contig file found.\n\tSkipping step.\n";
     }
     else {
     
@@ -981,18 +984,19 @@ while($cur_rd <= $assembly_rounds) {
     chomp($ctg_n);
     push(@presults, "NumberOfContigForMiniaRound".$cur_rd."=$ctg_n");
 
-    ####### 2- CONTIG EXTENSION ##################################################
+    ####### 2- CONTIG EXTENSION ###############################################
     
     print_subheader("2.2.".$cur_rd."- Contig extension for round $cur_rd");
 
     my $extfile = File::Spec->catfile($d05dir_R, "MergedExtendedContigs.fa");
     if (-e $extfile) {
     
-	print STDERR "\t$extfile extended contig file found. Skipping step.\n";
+	print STDERR "\t$extfile extended contig file found.\n";
+	print STDERR "\tSkipping step.\n";
     }
     else {
     
-	$extfile = run_mapsembler($ctgfile, \@fqlist, $d05dir_R, \%mapbler_args);
+	$extfile = run_mapsembler($ctgfile,\@fqlist,$d05dir_R,\%mapbler_args);
 	print STDERR "\n\tMapsembler extension has been performed\n";
     }
     push(@presults, "ContigExtensionRound".$cur_rd."File=$extfile");
@@ -1002,12 +1006,12 @@ while($cur_rd <= $assembly_rounds) {
     
     ####### 3- MAPPING READS ##################################################
     
-    print_subheader("2.3.".$cur_rd."- Mapping reads to contigs for round $cur_rd");
+    print_subheader("2.3.".$cur_rd."- Mapping reads to contigs, round $cur_rd");
 
     my $mapfile = File::Spec->catfile($d05dir_R, "MergedMappedReads.sam");
     if (-e $mapfile) {
     
-	print STDERR "\t$mapfile mapped reads file found. Skipping step.\n";
+	print STDERR "\t$mapfile mapped reads file found.\n\tSkipping step.\n";
     }
     else {
     
@@ -1019,14 +1023,14 @@ while($cur_rd <= $assembly_rounds) {
     chomp($map_n);
     push(@presults, "NumberOfReadsRemappedRound".$cur_rd."=$map_n");
 
-    ####### 4- READ EXTRACTION ##################################################
+    ####### 4- READ EXTRACTION ################################################
     
     print_subheader("2.4.".$cur_rd."- Read extraction for round $cur_rd");
 
     $readfile = File::Spec->catfile($d05dir_R, "MergedExtractedReads.fastq");
     if (-e $readfile) {
     
-	print STDERR "\t$readfile reads file found. Skipping step.\n";
+	print STDERR "\t$readfile reads file found.\n\tSkipping step.\n";
     }
     else {
     
@@ -1047,7 +1051,8 @@ my $finalctgs_sz = '';
 
 if (-e $finalctgs) {
     
-    print STDERR "\tFinal Minia contig file ($finalctgs) found. Skipping step.\n";
+    print STDERR "\tFinal Minia contig file ($finalctgs) found.\n";
+    print STDERR "\tSkipping step.\n";
 }
 else {
     
@@ -1056,7 +1061,7 @@ else {
 }
 
 
-##################################################################################
+###############################################################################
 ## STRUCTURAL ANNOTATION
 ## Once the contigs have been produced, the script will run Augustus to produce
 ## the CDS and the protein sequneces. Because Augustus runs on a single core and
@@ -1065,7 +1070,7 @@ else {
 ##  1- Splitting of the contigs
 ##  2- Run of multithreaded Augustus
 ##  3- Parse the Augustus output
-##################################################################################
+###############################################################################
 
 print_header("3) Performing gene structure annotation");
 
@@ -1109,9 +1114,11 @@ else {
     ## At the same time it will be convinient to create a file will all the 
     ## sequences with the new names
     
-    my $fa_seqio = Bio::SeqIO->new( -file => ">$f_assembly", -format => 'Fasta' );
+    my $fa_seqio = Bio::SeqIO->new( -file => ">$f_assembly", 
+				    -format => 'Fasta' );
 
-    ## The will need also a file with the CtgID\tCtgLength for later on bedtools;
+    ## The will need also a file with the CtgID\tCtgLength for later on 
+    ## bedtools;
     open my $fasz_fh, '>', $fa_sizes;
 
     my $seqn = 0;
@@ -1137,7 +1144,8 @@ else {
 	my $ctg_id = "CONTIG" . sprintf("%07s", $seqn);
 	my $seqfile = File::Spec->catfile($boxdir, $ctg_id . "_contigs.fa");
     
-	my $newseqio = Bio::SeqIO->new( -file => ">$seqfile", -format => 'Fasta' );
+	my $newseqio = Bio::SeqIO->new( -file => ">$seqfile", 
+					-format => 'Fasta' );
 
 	## Create tho object and write it
 	my $newseqobj = Bio::Seq->new( -id => $ctg_id, seq => $seqobj->seq() );
@@ -1224,7 +1232,7 @@ my $pep_n = `grep -c "^>" $pepfile`;
 chomp($pep_n);
 push(@presults, "NumberOfPredictedPEP=$pep_n");
 
-##################################################################################
+###############################################################################
 ## EVALUATION
 ## The evaluation steps will be composed by different steps:
 ##  1- BUSCO run on the final contigs (mode genome)
@@ -1232,7 +1240,7 @@ push(@presults, "NumberOfPredictedPEP=$pep_n");
 ##  3- Read remapping to the contigs
 ##  4- Mappin coverage evaluation
 ##  5- Variant calling and heterozygosity evaluation
-##################################################################################
+###############################################################################
 
 print_header("4) Performing genomic evaluations");
 
@@ -1264,7 +1272,8 @@ if ($opt_b) {
 	$gbusco_dir = run_busco($finalctgs, \%busco_args_g, $d07dir_s01);
     }
 
-    my $gsum = File::Spec->catfile($gbusco_dir, "short_summary_BUSCO_genome.txt");
+    my $gsum = File::Spec->catfile($gbusco_dir, 
+				   "short_summary_BUSCO_genome.txt");
     open my $gsum_fh, '<', $gsum;
 
     while(<$gsum_fh>) {
@@ -1317,7 +1326,8 @@ if ($opt_b) {
     }
 
     ## Get the BUSCO summary
-    my $bsum = File::Spec->catfile($pbusco_dir, "short_summary_BUSCO_proteins.txt");
+    my $bsum = File::Spec->catfile($pbusco_dir, 
+				   "short_summary_BUSCO_proteins.txt");
     open my $bsum_fh, '<', $bsum;
     while(<$bsum_fh>) {
     
@@ -1339,7 +1349,8 @@ if ($opt_b) {
     ## At this point it will read the full_table_BUSCO_proteins.tsv to assign 
     ## GeneID to BuscoIDS
 
-    my $bustab = File::Spec->catfile($pbusco_dir, "full_table_BUSCO_proteins.tsv");
+    my $bustab = File::Spec->catfile($pbusco_dir, 
+				     "full_table_BUSCO_proteins.tsv");
     open my $bustab_fh, '<', $bustab;
     while(<$bustab_fh>) {
     
@@ -1384,7 +1395,8 @@ else {
 
 ## Change from sam to bam and sort
 
-my $sortedbam = File::Spec->catfile($d07dir_s03, "FinalCtgsMappedReads.sorted.bam");
+my $sortedbam = File::Spec->catfile($d07dir_s03, 
+				    "FinalCtgsMappedReads.sorted.bam");
 if (-e $sortedbam) {
     
     print STDERR "\t$sortedbam Sorted Bam file found. Skipping step.\n";
@@ -1419,14 +1431,15 @@ push(@presults, "CoverageEvaluationFile=$covsumm");
 
 print_subheader("4.5- Calling self-variants");
 
-my $vcffile = File::Spec->catfile($d07dir_s03, "FinalAssembly.SelfmapVariants.vcf");
+my $vcffile = File::Spec->catfile($d07dir_s03, 
+				  "FinalAssembly.SelfmapVariants.vcf");
 if (-e $vcffile) {
     
     print STDERR "\t$vcffile self-variant file file found. Skipping step.\n";
 }
 else {
     
-    $vcffile = run_freebayes($finalctgs, $sortedbam, $d07dir_s03, \%fbayes_args);
+    $vcffile = run_freebayes($finalctgs,$sortedbam,$d07dir_s03,\%fbayes_args);
     print STDERR "\n\tSelf-variant calling has been performed\n";    
 }
 
@@ -1453,7 +1466,7 @@ if (-e $vafile) {
 }
 else {
     
-    $vafile = analyze_vcf($vcffile, $covsumm, $gfffile, \%busco_equiv, $d07dir_s03);
+    $vafile = analyze_vcf($vcffile,$covsumm,$gfffile,\%busco_equiv,$d07dir_s03);
     print STDERR "\n\tAnalysis of the VCF file has been performed\n";
     $globalstats = `grep WholeAssembly $vafile`;
 }
@@ -1462,8 +1475,8 @@ push(@presults, "VariantEvaluationFile=$vafile");
 
 my %gvar_stats = ();
 my $g = 0;
-my @gkeys = ("SeqID", "SeqType", "Length", "MeanCov", "Het", "Hom", "SNP", "INS", 
-	     "DEL", "MNP", "Complex");
+my @gkeys = ("SeqID", "SeqType", "Length", "MeanCov", "Het", "Hom", "SNP", 
+	     "INS", "DEL", "MNP", "Complex");
 foreach my $gstat (split(/\t/, $globalstats)) {
 
     $gvar_stats{$gkeys[$g]} = $gstat;
@@ -1503,10 +1516,10 @@ my $dupgenes = Math::BigFloat->new($duplicated*100/$single)->bfround(-3);
 print STDERR "\t\tGene duplication percentage:\t$dupgenes %\n";
 push(@presults, "DuplicatedGenes(%)=$dupgenes");
 
-##################################################################################
+###############################################################################
 ## Final steps
 ## * Assign reference sequence IDs to the rebuild CDS/proteins
-##################################################################################
+###############################################################################
 
 print_header("5) Assigning RefSeq Set IDs to reconstructed Genes/Proteins");
 my $d08dir = dmd_mkdir($outdir, "06_FinalResults");
@@ -1742,6 +1755,10 @@ sub create_diamond_db {
 
     my @s011_run = run( command => $run_dmddb, verbose => $opt_V );
 
+    if (!$s011_run[0]) {
+	
+	die("\n\tDiamond database run failed with error $s011_run[1]\n");
+    }
 }
 
 ###############################################################################
@@ -1786,6 +1803,11 @@ sub run_diamond {
     }
 
     my @run01dmd = run( command => $run_dmd, verbose => $opt_V );
+
+    if (!$run01dmd[0]) {
+	
+	die("\n\tDiamond run failed with error $run01dmd[1]\n");
+    }
 }
 
 ################################################################################
@@ -2191,76 +2213,6 @@ sub extract_alignments {
     return(\%maps, \%reads2map); 
 }
 
-###############################################################################
-## generate_consensus();
-## A function to generate consensus from the alignments
-## my %consensusfiles = generate_consensus(\%alignfiles, $outdir, $consperc);
-###############################################################################
-
-sub generate_consensus {
-
-    my %alignfiles = %{shift()};
-    my $d03dir = shift();
-    my $consperc = shift();
-
-    my %consensusfiles = ();
-
-    my $found = 0;
-
-    foreach my $seqid (sort keys %alignfiles) {
-
-	my $align_io = Bio::AlignIO->new(
-	    -file => $alignfiles{$seqid}, 
-	    -format => 'fasta'
-	    );
-
-	while ( my $alnobj = $align_io->next_aln() ) {
-
-	    ## First create the file to store the sequence
-	    my $cons_fname = File::Spec->catfile($d03dir, 
-						 $seqid . "_ConsensusPep.fa");
-	    $consensusfiles{$seqid} = $cons_fname;
-
-	    ## Check if it exists the file, if it does, skip the step
-
-	    unless (-e $cons_fname) {
-
-		open my $cons_fh, '>', $cons_fname;		
-            
-		## Remove the reference sequence before call the consensus
-		my $refseq = $alnobj->get_seq_by_id($seqid);
-		$alnobj->remove_seq($refseq);
-
-		if ($opt_V) {
-		    
-		#    print STDERR "\n\t\tCalling consensus $seqid alignment\n";
-		}
-
-		## Call the consensus
-		my $consensus = $alnobj->consensus_string($consperc);
-		
-		## Replace the ? sign by X
-		$consensus =~ s/\?/X/g;
-	    
-		## Print the consensus sequence
-		my $conseqname = $seqid . "_ConsPep";
-		print $cons_fh ">$conseqname\n$consensus\n";
-	    }
-	    else {
-	    
-		$found++;
-	    }
-	}
-    }
-
-    if ($found > 0) {
-    
-	print STDERR "\t$found consensus files found. Skipping step.\n";
-    }
-
-    return(%consensusfiles); 
-}
-
 
 ###############################################################################
 ## get_fastq_subsets();
@@ -2437,7 +2389,7 @@ sub get_mapbler_args {
 		my @mapbl_tr_h_run = run( command => $mapbl_tr_h );
 	
 		my %perm_mapbler_tr = ();
-		foreach my $mapbl_tr_arg (split(/\n/, $mapbl_tr_h_run[3]->[0])) {
+		foreach my $mapbl_tr_arg (split(/\n/, $mapbl_tr_h_run[3]->[0])){
 		    
 		    $perm_mapbler_tr{$mapbl_tr_arg} = 1;
 		}
@@ -2451,15 +2403,16 @@ sub get_mapbler_args {
 
 		    unless (exists $perm_mapbler_tr{$m_arg}) {
 		    
-			my $error = "$m_arg is not Mapsembler2 extremities option";
+			my $error = 
+			    "$m_arg is not Mapsembler2 extremities option";
 			die("\nMAPSEMBLER OPTION ERROR: $error.\n");
 		    }
 		    else {
 			
 			if (exists $mapblerextr_ban{$m_arg}) {
 			
-			    my $warn = "Mapsembler2 extremities argument $m_arg ";
-			    $warn .= "can not be used.";
+			    my $warn = "Mapsembler2 extremities argument ";
+			    $warn .= "$m_arg can not be used.";
 			    warn("\nWARNING: $warn\n");
 			}
 			else {
@@ -2479,7 +2432,7 @@ sub get_mapbler_args {
 		my @mapbl_te_h_run = run(command => $mapbl_te_h);
 	    
 		my %perm_mapbler_te = ();
-		foreach my $mapbl_te_arg (split(/\n/, $mapbl_te_h_run[3]->[0])) {
+		foreach my $mapbl_te_arg (split(/\n/, $mapbl_te_h_run[3]->[0])){
 		
 		    $perm_mapbler_te{$mapbl_te_arg} = 1;
 		}
@@ -2513,7 +2466,8 @@ sub get_mapbler_args {
 	    }
 	    else {
 	
-		die("ERROR: -e <mapsembler_args> dont have the right format.\n");
+		my $error_m = "-e <mapsemblerargs> dont have the right format.";
+		die("ERROR: $error_m\n");
 	    }
 	}
     }    
@@ -2663,17 +2617,16 @@ sub run_minia {
 	
     my @minia_run = run( command => $run_miniacmd, verbose => $opt_V );
     
-    if ($minia_run[0] == 0) {
+    if (!$minia_run[0]) {
 	
-	print STDERR "\n\tMinia run failed with error $minia_run[1]\n";
+	die("\n\tMinia run failed with error $minia_run[1]\n");
     }
     else {
 	
 	## Minia assembly could not produce a contig file, so
 	## it will check it before add it to the hash
 	
-	$assembly_file = $outbase . ".contigs.fa";
-	
+	$assembly_file = $outbase . ".contigs.fa";	
     }
 
     return($assembly_file);
@@ -2712,7 +2665,8 @@ sub run_mapsembler {
     push(@mapbler_extr_cmd, "--reads \"$inputfqs\"");
 
     ## Build the output
-    my $outextr =  File::Spec->catfile($dir, "MergedMapsember2Extremities.fasta");
+    my $outextr =  File::Spec->catfile($dir, 
+				       "MergedMapsember2Extremities.fasta");
     push(@mapbler_extr_cmd, "--output $outextr");
 	
     ## Add the arguments
@@ -2727,16 +2681,18 @@ sub run_mapsembler {
 
     if (-e $outextr) {
 
-	print STDERR "\n\tMapsembler2 extremities file exists. Skipping step.\n";
+	print STDERR "\n\tMapsembler2 extremities file exists.\n";
+	print STDERR "\tSkipping step.\n";
     }
     else {
 
-	my @mbextr_run = run( command => $run_mapbler_extr_cmd, verbose => $opt_V );
+	my @mbextr_run = run( command => $run_mapbler_extr_cmd, 
+			      verbose => $opt_V );
     
-	if ($mbextr_run[0] == 0) {
+	if (!$mbextr_run[0]) {
 	
-	    print STDERR "\n\tMapsembler2 extremities run failed with error ";
-	    print STDERR "$mbextr_run[1]\n";
+	    my $e = "Mapsembler2 extremities run failed, error $mbextr_run[1]";
+	    die("\n\t$e\n");
 	}	
     }
 
@@ -2770,10 +2726,9 @@ sub run_mapsembler {
     print STDERR "\n\tRunning Mapsembler2 extend\n";
     my @mbexte_run = run( command => $run_mapbler_exte_cmd, verbose => $opt_V );
     
-    if ($mbexte_run[0] == 0) {
+    if (!$mbexte_run[0]) {
 	
-	print STDERR "\n\tMapsembler2 extend run failed with error ";
-	print STDERR "$mbexte_run[1]\n";
+	die("\n\tMapsembler2 extend run failed with error $mbexte_run[1]\n");
     }	
 
     ## The expected output will be the outbase_exte + _k_$k + _c_$c +_t_$t
@@ -2800,11 +2755,12 @@ sub run_mapsembler {
     }
     else {
     
-	$expected_out .= "_t_1";
+	$expected_out .= "_t_2";
     }
     $expected_out .= '.fasta';
 
-    ## Then it will move the name of the $expected out to MergedExtendedContigs.fa
+    ## Then it will move the name of the $expected out to 
+    ## MergedExtendedContigs.fa
     my $mapbleroutfile =  File::Spec->catfile($dir, "MergedExtendedContigs.fa");
     move($expected_out, $mapbleroutfile);
 
@@ -2817,11 +2773,11 @@ sub run_mapsembler {
 }
 
 
-#################################################################################
+###############################################################################
 ## run_readmap()
 ## A function to map the reads back to the extended contigs using bowtie
 ## $mapfile = run_readmap($extfile, \@fqlist, $d05dir_R, \%bwt_args);
-#################################################################################
+###############################################################################
 
 sub run_readmap {
 
@@ -2895,10 +2851,9 @@ sub run_readmap {
 	print STDERR "\n\tRunning Bowtie2 on $fqfile => $basename \n";
 	my @bwt_run = run( command => $run_bwt_cmd, verbose => $opt_V );
         
-	if ($bwt_run[0] == 0) {
+	if (!$bwt_run[0]) {
 	    
-	    print STDERR "\n\tBowtie2 run for $fqfile failed with error ";
-	    print STDERR "$bwt_run[1]\n";
+	    die("\n\tBowtie2 run for $fqfile failed with error $bwt_run[1]\n");
 	}	 
 	$nfile++;
     }
@@ -2909,12 +2864,12 @@ sub run_readmap {
 }
 
 
-#################################################################################
+###############################################################################
 ## run_extractreads()
 ## A function to extract reads from a sam file and put the into the
 ## "MergedExtractedReads.fastq" file
 ## $readfile = run_extractreads($mapfile, $d05dir_R);
-##################################################################################
+###############################################################################
 
 sub run_extractreads {
 
@@ -2941,11 +2896,11 @@ sub run_extractreads {
     return($readsfile);
 }
 
-#################################################################################
+###############################################################################
 ## run_augustus()
 ## A function to run augustus over the scaffolds
 ## ($gff, $cds, $pep) = run_augustus(\%assembly, \%prf_files, $d07dir_r);
-#################################################################################
+###############################################################################
 
 sub run_augustus {
 
@@ -3188,18 +3143,18 @@ sub parse_augustus {
 	}
     }
 
-    print STDERR "\n\t$cdsc CDS and $pepc protein sequences have been predicted\n";
+    print STDERR "\n\t$cdsc CDS & $pepc PEP sequences have been predicted\n";
 
     return($gfffile, $cdsfile, $pepfile);     
 }
 
 
 
-##################################################################################
+###############################################################################
 ## run_busco()
 ## A function to run BUSCO
 ## my $gbusco_dir = run_busco($finalctgs, \%busco_args, $d07dir);
-##################################################################################
+###############################################################################
 
 sub run_busco {
 
@@ -3224,10 +3179,9 @@ sub run_busco {
     my $run_busco_cmd = join(" ", @busco_cmd);
     my @busco_run = run( command => $run_busco_cmd, verbose => $opt_V );
     
-    if ($busco_run[0] == 0) {
+    if (!$busco_run[0]) {
 	
-	print STDERR "\n\tBUSCO run failed with error ";
-	print STDERR "$busco_run[1]\n";
+	die("\n\tBUSCO run failed with error $busco_run[1]\n");
     }	
 
     move($outname, $b_outdir);
@@ -3236,11 +3190,11 @@ sub run_busco {
 
 
 
-##################################################################################
+################################################################################
 ## run_bamsort()
 ## function to transform sam into bam, sort it and create an index
 ## $sortedbam = run_bamsort($remapfile, $d07dir_s03);
-##################################################################################
+################################################################################
 
 sub run_bamsort {
 
@@ -3258,10 +3212,11 @@ sub run_bamsort {
     my $run_sam2bam_cmd = join(" ", @sam2bam_cmd);
     my @sam2bam_run = run( command => $run_sam2bam_cmd, verbose => $opt_V );
     
-    if ($sam2bam_run[0] == 0) {
+    if (!$sam2bam_run[0]) {
 	
-	print STDERR "\n\tsamtools view (sam2bam) run failed with error ";
-	print STDERR "$sam2bam_run[1]\n";
+	my $error = "\n\tsamtools view (sam2bam) run failed with error ";
+	$error .= "$sam2bam_run[1]\n";
+	die($error);
     }	
     
     ## Sort the bam
@@ -3282,10 +3237,9 @@ sub run_bamsort {
     my $run_idxbam_cmd = join(" ", @idxbam_cmd);
     my @idxbam_run = run( command => $run_idxbam_cmd, verbose => $opt_V );
     
-    if ($idxbam_run[0] == 0) {
+    if (!$idxbam_run[0]) {
 	
-	print STDERR "\n\tsamtools index run failed with error ";
-	print STDERR "$idxbam_run[1]\n";
+	die("\n\tsamtools index run failed with error $idxbam_run[1]\n");
     }	
 
     return($sortedbam);
@@ -3293,11 +3247,11 @@ sub run_bamsort {
 
 
 
-###################################################################################
+###############################################################################
 ## run_bedtools()
 ## function to fun bedtools on the remapping file to estimate coverage
 ## my $covfile = run_bedtools($refseq_length, $bam, $outdir)
-###################################################################################
+###############################################################################
 
 sub run_bedtools {
 
@@ -3323,10 +3277,9 @@ sub run_bedtools {
     my $run_bed_cmd = join(" ", @bed_cmd);
     my @bed_run = run( command => $run_bed_cmd, verbose => $opt_V );
     
-    if ($bed_run[0] == 0) {
+    if (!$bed_run[0]) {
 	
-	print STDERR "\n\tBedtools genomecov run failed with error ";
-	print STDERR "$bed_run[1]\n";
+	die("\n\tBedtools genomecov run failed with error $bed_run[1]\n");
     }	
 
     return($covfile);    
@@ -3334,14 +3287,14 @@ sub run_bedtools {
 
 
 
-#################################################################################
+###############################################################################
 ## make_covsum_file()
 ## A function to parse the coverage file and produce a summary file with the
 ## following structure:
 ## FirstRow = WholeAssembly\t$GlobalMinCov\t$GlobalMaxCov\t$GlobalMeanCov\n.
 ## NextRows = $CtgID\t$MinCov\t$MaxCov\t$MeanCov\n
 ## make_covsum_file($covfile, $covsumm);
-#################################################################################
+###############################################################################
 
 sub make_covsum_file {
 
@@ -3369,7 +3322,8 @@ sub make_covsum_file {
 	}    
     }
 
-    ## Once the file has been processed it will calculate MinCov, MaxCov & MeanCov
+    ## Once the file has been processed it will calculate MinCov, MaxCov 
+    ## & MeanCov
 
     my $g_min = min(@globaldata);
     my $g_max = max(@globaldata);
@@ -3475,7 +3429,8 @@ sub get_fbayes_args {
 	    
 		    if (exists $fbayes_ban{$fb_arg}) {
 			
-			my $warn = "Freebayes argument $fb_arg can not be used.";
+			my $warn = 
+			    "Freebayes argument $fb_arg can not be used.";
 			warn("\nWARNING: $warn\n");
 		    }
 		    else {
@@ -3492,11 +3447,11 @@ sub get_fbayes_args {
 
 
 
-###################################################################################
+###############################################################################
 ## run_freebayes()
 ## function to fun freebayes and call the variants
 ## my $vcffile = run_freebayes($refseq, $bam, $outdir, \%fbayes_args)
-###################################################################################
+###############################################################################
 
 sub run_freebayes {
 
@@ -3525,10 +3480,9 @@ sub run_freebayes {
     my $run_fbayes_cmd = join(" ", @fbayes_cmd);
     my @fbayes_run = run( command => $run_fbayes_cmd, verbose => $opt_V );
     
-    if ($fbayes_run[0] == 0) {
+    if (!$fbayes_run[0]) {
 	
-	print STDERR "\n\tFreebayes run failed with error ";
-	print STDERR "$fbayes_run[1]\n";
+	die("\n\tFreebayes run failed with error $fbayes_run[1]\n");
     }	
 
     return($vcffile);    
@@ -3536,7 +3490,7 @@ sub run_freebayes {
 
 
 
-##################################################################################
+###############################################################################
 ## analyze_vcf()
 ## A function to analyze the stats of the VCF file
 ## The analysis of the self variants will produce a sumary file named as
@@ -3549,8 +3503,8 @@ sub run_freebayes {
 ##  * Gene
 ##  * FullTranscript
 ##  * SumIntrons
-## $vafile = analyze_vcf($vcffile, $covsumm, $gfffile, \%busco_equiv, $d07dir_s03);
-#################################################################################
+## $vafile = analyze_vcf($vcffile,$covsumm,$gfffile,\%busco_equiv,$d07dir_s03);
+###############################################################################
  
 sub analyze_vcf {
     
@@ -3640,8 +3594,8 @@ sub analyze_vcf {
 	}
     }
 
-    ## At this point the assembly and the contigs will have the variant information
-    ## We will parse now the summary coverage
+    ## At this point the assembly and the contigs will have the variant 
+    ## information. We will parse now the summary coverage
 
     open my $covsum_fh, '<', $covsumm;
     while(<$covsum_fh>) {
@@ -3655,8 +3609,8 @@ sub analyze_vcf {
     }
 
     ## Once we have added the mean, we will have ready the non annotated 
-    ## variants. We will get the annotated ones using bedtools between the GFF and
-    ## the VCF. The program will parse the output
+    ## variants. We will get the annotated ones using bedtools between the 
+    ## GFF and the VCF. The program will parse the output
 
     my $intbedfile = File::Spec->catfile($odir, "FinalAssembly.GFFvsVCF.bed");
 
@@ -3760,9 +3714,9 @@ sub analyze_vcf {
     }
     
     ## Once it has been parsed, it will print the output
-    my @psortlist = ('type', 'length', 'MeanCov', 'het', 'hom', 'snp', 'ins', 'del',
-		     'mnp', 'complex');
-    
+    my @psortlist = ('type', 'length', 'MeanCov', 'het', 'hom', 'snp', 'ins', 
+		     'del', 'mnp', 'complex');
+     
     my $sumfile = File::Spec->catfile($odir, "SummaryGenomeVariants.txt");
     open my $sum_fh, '>', $sumfile;
     my $phead = "#SeqID/FeatID\t" . join("\t", @psortlist);
@@ -3786,11 +3740,11 @@ sub analyze_vcf {
 
 
 
-##################################################################################
+###############################################################################
 ## reassign_seqids()
 ## A function to select and rename the sequence
 ## reassign_seqids($oldfasta, $newfasta, \%buscoequiv, $prefix)
-##################################################################################
+###############################################################################
 
 sub reassign_seqids {
 
@@ -3799,8 +3753,10 @@ sub reassign_seqids {
     my %busco_equiv = %{shift()};
     my $prefix = shift() || "";
 
-    my $oldseq_io = Bio::SeqIO->new( -file => "$oldfasta", -format => "Fasta" );
-    my $newseq_io = Bio::SeqIO->new( -file => ">$newfasta", -format => "Fasta" );
+    my $oldseq_io = Bio::SeqIO->new( -file   => "$oldfasta", 
+				     -format => "Fasta" );
+    my $newseq_io = Bio::SeqIO->new( -file   => ">$newfasta", 
+				     -format => "Fasta" );
 
     my $seq_n++;
     my %copiesbusco = ();
@@ -3820,7 +3776,7 @@ sub reassign_seqids {
 		
 		$copiesbusco{$buscoid} = 1;
 	    }
-	    my $busco_name = $prefix ."_". $buscoid . "_" . $copiesbusco{$buscoid};
+	    my $busco_name = $prefix."_".$buscoid."_".$copiesbusco{$buscoid};
 	    $seqobj->description($seqid);
 	    $seqobj->id($busco_name);
 	    $newseq_io->write_seq($seqobj);
