@@ -2769,7 +2769,7 @@ sub run_mapsembler {
 
     move("./index_k_*", $dir);
 
-    return($expected_out);
+    return($mapbleroutfile);
 }
 
 
