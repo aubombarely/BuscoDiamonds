@@ -128,7 +128,7 @@
   ==========================
   -------------------------------------------------------------------------
   00_DiamondReference: Directory with the Diamond database (*.dmnd file)
-  -------------------------------------------------------------------------
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
   01_DiamondMapping: Directory with the results of the Diamond mapping
   - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     DiamondMapping.CompSummary.txt   
