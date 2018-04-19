@@ -111,16 +111,132 @@
         mode. This option is only available with -b <BUSCO_lineage> option is 
         supplied.
 
+  Sequence Coverage Evaluation
+  ============================
+  Sequence coverage evaluation is performed mapped the reads back to the contigs
+  and running Bedtools genomecov on the bam files. The script will calculate
+  the minimum, maximum and mean for each contig and for the whole assembly 
+  (marked as WholeAssembly) and report them in the FinalAssembly.coverage.txt 
+  file
+
+  Heterozygosity
+  ==============
+  BuscoDiamonds will also evaluate the heterozygosity of the sample calling
+  variants on the bam file using Freebayes.
+
+  Output Directories and Files
+  ==========================
+  -------------------------------------------------------------------------
+  00_DiamondReference: Directory with the Diamond database (*.dmnd file)
+  -------------------------------------------------------------------------
+  01_DiamondMapping: Directory with the results of the Diamond mapping
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    DiamondMapping.CompSummary.txt   
+     - Gene space evaluation with seven columns: GroupID, ExpectedLength, 
+       ExpectedLengthSD (preset by -l option or the 10% of the ExpectedLength),
+       NumberOfReadHits, AaCoveredByOneOrMoreReads, AaCoveredByFiveOrMoreReads 
+       and Tag classifying the coverage of the RefSeq.    
+    DiamondMapping.coverage.txt      
+     - Mapping coverage file with one line per reference sequence. Each line has
+       three columns: RefSeqID, RefSeqLength, MappingDepthByPosition 
+       (separated by commas) 
+    DiamondMapping.PepRefSummary.txt 
+     - Gene space evaluation summary based on the Diamond mapping
+    DiamondMapping.sam               
+     - Mapping file in Sam format (Diamond output)
+  -------------------------------------------------------------------------
+  02_ExtractedReads: Directory for the extracted reads from the Diamond mapping
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    DndHitsReadIDs.txt
+     - List of the read IDs from the Diamond output
+    DndHitsReadSet.fq
+     - Reads mapped to the Reference File
+  -------------------------------------------------------------------------
+  03_Assembly: Directory with one subdirectory per round (Assembly_RoundX)
+               where X is the assembly round. It also will contain the final
+               assembly file (MergedMiniaAssembly.contigs.fa), the formated
+               assembly file with contig_ids as CONTIGXXXXXXX where X is the
+               contig number (FinalAssembly.contigs.fa) and the indexes of the
+               final assembly for the Bowtie2 mapping. The Assembly_RoundX
+               directory contains:
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    MergedMiniaAssembly.contigs.fa
+     - Contigs for Minia assembly
+    MergedMiniaAssembly.contigs.h5
+     - Kmer graphs for Minia assembly
+    MergedMapsember2Extremities.fasta
+     - Extremities for the Mapssembler2 run
+    MergedMapsember2Extend_k_K_c_C_t_2.fasta
+     - Extended contigs for Mapssembler2 run where K=Kmer, C=Coverage and 
+       This file will be renamed to the file MergedExtendedContigs.fa
+    MergedExtendedContigs.*.bt2
+     - Indexes for Bowtie2
+    MergedMappedReads.sam
+     - Mapped reads to the MergedMapsember2Extend_k_K_c_C_t_2.fasta file
+    MergedExtractedReads.fastq
+     - Extracted reads from the MergedMappedRead.sam file  
+  -------------------------------------------------------------------------
+  04_StructuralAnnotation: Directory with the structural annotation of the 
+                           contigs. It will have three subdirectories
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    01_OneContigPerFile
+     - A directory with single sequence files to multithread Augustus
+    02_AugustusPredictions
+     - A directory with the one file per Augustus prediction.
+    03_GeneModels
+     - A directory with three files: 1- MergedAugustus.gff with the gene models
+       2- MergedAugustus.CDS.fasta, fasta file with the predicted CDS and 3-
+       MergedAugustus.PEP.fasta, a fasta file with the predicted proteins 
+ -------------------------------------------------------------------------
+  05_GeneSpaceEvaluation: Directory with three subdirectories with the BUSCO
+                          run for the contigs (01_GeneSpace_By_Genome) and 
+                          the proteins (02_GeneSpace_By_ProteinSet). It also
+                          contains the 03_ReadRemappingEvaluation directory
+                          with the following files:
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    FinalCtgsMappedReads.sam/bam/sorted.bam/sorted.bam.bai
+      - SAM/BAM files after the mapping of the whole read dataset to the contigs
+    FinalAssembly.coverage.txt
+      - Bed file with the coverage per position (output of Bedtools genomecov)
+    FinalAssembly.SelfmapVariants.vcf
+      - VCF file with the variant calling (Freebayes on the remapped BAM)
+    FinalAssembly.GFFvsVCF.bed
+      - GFF/VCF intersect Bed file  (output of Bedtools insersect)
+    SummaryGenomeCoverage.txt
+      - Summary with the sequencing coverage analysis (with 4 columns: 
+        ContigID, minimum coverage, Maximum coverage and mean coverage). 
+        The WholeAssembly is printed in the second line.
+    SummaryGenomeVariants.txt
+      - Summary with the variants, with the following columns: SeqID/FeatID, 
+        type, length, mean coverage/depth, heterozygous variants, homozygous 
+        variants, SNPs, insertions, deletions, mnp and complex variants.
+  -------------------------------------------------------------------------
+  06_Finalresults: Directory with the final results
+  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    BuscoDMD_CDS.fasta
+     - Predicted CDS with the SeqID as Prefix (-p option) + RefSeqIDMatch + N 
+       (for multiple copies). In the description, it is presented the original 
+       geneID assigned by Augustus.
+    BuscoDMD_PEP.fasta
+     - Predicted proteins (with the same SeqIDs than the CDS file)
+    BuscoDMD_RunSummary.txt
+     - Summary of the run with stats and files.
+  -------------------------------------------------------------------------
 
 
   Examples of running commands
   ============================
-  Basic command
+  Basic command without run BUSCO
   ``` 
    BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq -o MySp_BuscoDiamonds2018 -l BuscoPlantProtein_lengths_cutoff
   ```
 
-   Filtering the hits with percentage of similarity below 60%
-   ```
-   BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq -o MySp_BuscoDiamonds2018 -f ZI=60
-   ```
+  Basic command running BUSCO
+  ```  
+    BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq -o MySp_BuscoDiamonds2018 -l BuscoPlantProtein_lengths_cutoff -b BuscoDirectoryWithTheLineage
+  ```
+
+  Filtering the hits with percentage of similarity below 60%
+  ```
+    BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq -o MySp_BuscoDiamonds2018 -f ZI=60
+  ```
