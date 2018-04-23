@@ -145,6 +145,7 @@ B<help>                   Print the help
    * Samtools accessible from the path or as env. variable SAMTOOLS_PATH
    * Bedtools accessible from the path or as env. variable BEDTOOLS_PATH 
    * Freebayes accessible from the path or as env. variable FREEBAYES_PATH
+   * BUSCO accessible from the path or as env. variable BUSCO_PATH
 
   Steps
   =====
@@ -1636,6 +1637,7 @@ sub help {
      * Samtools accessible from the path or as env. variable SAMTOOLS_PATH
      * Bedtools accessible from the path or as env. variable BEDTOOLS_PATH 
      * Freebayes accessible from the path or as env. variable FREEBAYES_PATH
+     * BUSCO accessible from the path or as env. variable BUSCO_PATH
 
     Steps:
  
