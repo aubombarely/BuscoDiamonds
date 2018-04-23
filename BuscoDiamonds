@@ -1579,92 +1579,149 @@ sub help {
 
     Usage:
 
-       BuscoDiamonds [-h] -r <fasta_reference> 
-                          -i <fastq_input_files> 
-                          -o <outputdir>
-                          [-f <hits_filters>] 
-                          [-t <threads>] 
-                          [-c <consensus_perc>]
-			  [-m <minia_args>]
-                          [-R]
+        BuscoDiamonds [-h] -r <fasta_reference> -i <fastq_input_files> 
+                           -o <outputdir> [-f <hits_filters>] [-t <threads>]
+                           [-l <grouplength_std>] [-m <minia_arguments>]
+                           [-e <mapsembler_arguments>] [-w <bowtie2_arguments>]
+                           [-a <assembly_rounds>] [-b <busco_lineage_dir>]
+                           [-s <freebayes_arguments>] [-p <seqid_prefix>]
+                           [-V]
 
     Description:
       
-     This program has several functions:
-      1- Evaluate the completeness of the gene space in a whole genome 
-         sequencing dataset that has not been assembled.
-      2- Reconstruct the gene/CDS/protein associated with the hits of the
-         Gene Space reference.
-      3- Evaluate the duplication level of the analyzed Gene Space.
-      4- Estimate the genome coverage and heterozygosity based in the 
-         reconstruction of the evaluation Gene Space set.
+    This program has several functions:
+       1- Evaluate the completeness of the gene space in a whole genome 
+          sequencing dataset that has not been assembled.
+       2- Reconstruct the gene/CDS/protein associated with the hits of the
+          Gene Space reference.
+       3- Evaluate the duplication level of the analyzed Gene Space.
+       4- Estimate the genome coverage and heterozygosity based in the 
+          reconstruction of the evaluation Gene Space set.
 
-     We define the gene space as the gene population in the genome of a 
-     specific individual or accession. So, for example, the gene space for the 
-     Arabidopsis thaliana Col. genome (annotation TAIR10) is composed by 27,416 
-     genes.
+    We define the gene space as the gene population in the genome of a specific
+    individual or accession. So, for example, the gene space for the Arabidopsis
+    thaliana Col. genome (annotation TAIR10) is composed by 27,416 genes.
 
-     A gene space representative is serie of proteins that could be found in 
-     most of the species of a specific clade. So for example, if all the 
-     Brassicaceae species shared the same 8,000 genes, a gene space 
-     representaive for the Brassicaeae clade will have an ancestor single copy 
-     ortholog of those genes. You can find more information about the ortholog 
-     datasets at Zdobnov et al. 2017 (OrthoDB v9.1) and Waterhouse et al. 2017 
-     (BUSCO3).  
+    A gene space representative is serie of proteins that could be found in most
+    of the species of a specific clade. So for example, if all the Brassicaceae
+    species shared the same 8,000 genes, a gene space representaive for the
+    Brassicaeae clade will have an ancestor single copy ortholog of those genes.
+    You can find more information about the ortholog datasets at Zdobnov et al.
+    2017 (OrthoDB v9.1) and Waterhouse et al. 2017 (BUSCO3).  
   
-     This scripts uses DIAMOND (Buchfink et al. 2015) to align unassembled short
-     reads against a BUSCO/OrthoDB dataset to evaluate the completness of the
-     genome before the assembly, but at the same time re-construct the genes, 
-     CDS and proteins to retrieve more information (e.g. heterozygosity, 
-     coverage...).
+    This scripts uses DIAMOND (Buchfink et al. 2015) to align unassembled short
+    reads against a BUSCO/OrthoDB dataset to evaluate the completness of the
+    genome before the assembly, but at the same time re-construct the genes, 
+    CDS and proteins to retrieve more information (e.g. heterozygosity, coverage
+    ...).
 
-     Prerrequisites
-      * Bioperl
-      * Diamond accessible from the path or as the env. variable DIAMOND_PATH
-      * Seqtk accessible from the path or as the env. variable SEQTK_PATH
-      * Minia accessible from the path or as the env. variable MINIA_PATH
-      * Exonerate accessible from the path or as the env. variable 
-        EXONERATE_PATH
-      * Gapcloser accessible from the path or as the env. variable 
-        GAPCLOSER_PATH 
+    The script uses two mandatory parameters:
+      1- Reference protein sequence file (-r)
+      2- A list of fastq short read files to map to the reference (-i). 
+         Multiple files can be specified using the comma. The script DOES 
+         NOT USE the pair end information
 
-     Steps
-      1-  Create the DIAMOND database.
-      2-  Align the reads against the DIAMOND database.
-      3-  Parse the sam DIAMOND output into Bioperl Align objects.
-      4-  Call the Protein Consensus
-      5-  Run the evaluation of the completeness of the protein set.
-      6-  Build the CDS for each of the proteins
-      7-  Estimate the coverage average for each CDS
-      8-  Estimate the heterozygosity for each CDS
-      9-  Build the gene sequence with introns like gaps
-      10- Run GapCloser to fill the intron-gaps.
+    (more complete manual running "perldoc BuscoDiamond")
 
-     Examples of running commands
-      # Basic command
+    Prerrequisites:
+     * Bioperl
+     * Diamond accessible from the path or as env. variable DIAMOND_PATH
+     * Seqtk accessible from the path or as env. variable SEQTK_PATH
+     * Minia accessible from the path or as env. variable MINIA_PATH
+     * Bowtie2 accessible from the path or as env. variable BOWTIE2_PATH
+     * Mapsembler2 accessible from the path or as env. variable MAPSEMBLER_PATH
+     * Augustus accessible from the path or as env. variable AUGUSTUS_PATH
+       Additionally the the Augustus config directory should be accessible as
+       environmental variable AUGUSTUS_CONFIG_PATH
+     * Samtools accessible from the path or as env. variable SAMTOOLS_PATH
+     * Bedtools accessible from the path or as env. variable BEDTOOLS_PATH 
+     * Freebayes accessible from the path or as env. variable FREEBAYES_PATH
+
+    Steps:
+ 
+      +---- 
+      | 1.1- Create the DIAMOND database.
+      | 1.2- Align the reads against the DIAMOND database.
+    1x| 1.3- Filter the DIAMOND output if a filter was specified
+      | 1.4- Estimate the completeness of REF_GENE_SPACE based in the mapping
+      | 1.5- Select of the Fastq reads that were mapped to the reference
+      +-----
+      +-----
+      | 2.1- Run Minia assembler on the Fastq reads
+    Rx| 2.2- Extend the Minia contigs with Mapsembler2
+      | 2.3- Mapping the whole read dataset back to the extended contigs
+      | 2.4- Extract the reads from the mapping
+      +-----
+    1x| 2.5- Reassemble the fastq reads with Minia
+      +-----  
+      +-----
+      | 3.1- Split contigs in separate files
+    1x| 3.2- Run Augustus in a multithread mode
+      | 3.3- Parse the Augustus output to get CDS and protein sequences
+      +-----
+      +-----
+      | 4.1- Evaluate the completness in the assembly (final contigs) with BUSCO
+      | 4.2- Evaluate the completness in the predicted proteins with BUSCO
+    1x| 4.3- Reads remapping with the assembly
+      | 4.4- Coverage analysis using Bedtools
+      | 4.5- Variant calling using Freebayes
+      | 4.6- Heterozygosity evaluation
+      +-----
+      +-----
+    1x| 5.1- Assignment of RefSeqIDs to CDS and proteins
+      | 5.2- Generation of a summary file
+      +-----
+       Note1: The number of assembly rounds (R) will be defined by the parameter
+           -a <assembly rounds>
+   
+    Arguments_for_External_Tools:
+     BuscoDiamonds can pass some arguments to some tools such as:
+      * Minia: -m <minia_args> (e.g. -m '-abundance-min=5')
+      * Mapsembler2: -e <extremities:args;extend:args> (e.g. -e 'extend:-c=5')
+      * Bowtie2: -w <bowtie2_args> (e.g. -w '--very-fast')
+      * Freebayes: -s <freebayes_args> (e.g. -s '--no-complex,--min-coverage=5')
+
+       Note1: Threading options will be overwritten by -t <threads>
+       Note2: Imput/Output/Formating options are banned.
+       Note3: To use Kmers > 31 for Minia and Mapsembler2, you may need to 
+              recompile the tool using make k=64
+
+  
+
+    Examples_of_running_commands:
+     # Basic command without run BUSCO
       BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
-                    -o MySp_BuscoDiamonds2018
+                    -o MySp_BuscoDiamonds2018 -l BuscoPlantlengths_cutoff
 
-      # Filtering the hits with percentage of similarity below 60%
+     # Basic command running BUSCO
+      BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
+                    -o MySp_BuscoDiamonds2018 -l BuscoPlantlengths_cutoff
+                    -b BuscoDirectoryWithTheLineage
+
+     # Filtering the hits with percentage of similarity below 60%
       BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
                     -o MySp_BuscoDiamonds2018 -f ZI=60
 
-      # Calling the consensus protein sequence with a minimum of 90%
-      BuscoDiamonds -r BuscoPlantProteins.fasta -i MySp_R1.fq,MySp_R2.fq 
-                    -o MySp_BuscoDiamonds2018 -c 90
  
     Flags:
 
-      -r <fasta_reference>  Fasta file with the reference proteins (mandatory)
-      -i <fastqinputfiles>  Fastq input file(s) separated by commas (mandatory) 
-      -o <output_dir>       Output directory (mandatory)
-      -f <hits_filter>      Filter for Diamond hits as tag1=val1,tag2=val2...
-      -t <num_threads>      Number of threads to run Diamond (default: all)
-      -c <consensus_perc>   Consensus percentage threshold for the protein seq.
-      -m <minia_args>       Minia args. as arg=value separated by commas
-      -V <be_verbose>       Be verbose and print the parsing status.
-      -v <version>          print version
-      -h <help>             print the help
+     -r <fasta_reference>     Fasta file with the reference proteins (mandatory)
+     -i <fastq_input_files>   Fastq files separated by commas (mandatory) 
+     -o <output_dir>          Output directory (mandatory)
+     -f <hits_filter>         Filter for Diamond hits as tag1=val1,tag2=val2...
+     -t <num_threads>         Number of threads to run Diamond (default: all)
+     -l <group_length_std>    Tab file with the group length SD (default:10%)
+     -m <minia_arguments>     Minia arguments as arg=value separated by commas
+     -a <assembly_rounds>     Assembly rounds (default:1)
+     -e <mapssebler_args>     Mapsembler2 arguments (see instructions)
+     -w <bowtie2_arguments>   Bowtie2 arguments as arg=value separated by commas
+     -b <busco_lineage_dir>   BUSCO lineage directory (enables BUSCO run)
+     -s <freebayes_args>      Freebayes args as arg=value separated by commas
+     -p <seqid_prefix>        Prefix for the final sequence IDs (default: Bdmd)
+     -V <be_verbose>          Be verbose and print the parsing status.
+     -v <version>             Print version
+     -h <help>                Print the help
+
 
 
 EOF
@@ -2772,15 +2829,46 @@ sub run_mapsembler {
     }
     $expected_out .= '.fasta';
 
-    ## Then it will move the name of the $expected out to 
-    ## MergedExtendedContigs.fa
+    ## Once the extension has finished there are a couple of task that need
+    ## to be done:
+    ## 1- Produce a new file where the sequence ID right_extension_0 and
+    ##    left_extension_0 are replaced to avoid the message:
+    ##    [W::sam_hdr_parse] Duplicated sequence 'left_extension_0'
+
     my $mapbleroutfile =  File::Spec->catfile($dir, "MergedExtendedContigs.fa");
-    move($expected_out, $mapbleroutfile);
+    my $old_extseqio = Bio::SeqIO->new( -file   => $expected_out,
+					-format => 'Fasta');
 
-    ## Additionally the program will create a serie of indexes that it will be
-    ## convinient to move
+    my $new_extseqio = Bio::SeqIO->new( -file   => "$mapbleroutfile",
+					-format => 'Fasta');
 
-    move("./index_k_*", $dir);
+    my $ctg_n = 0;
+    while(my $seqobj = $old_extseqio->next_seq()) {
+    
+	$ctg_n++;
+	my $ctg_id = "EXTCONTIG" . sprintf("%07s", $ctg_n);
+	$seqobj->id($ctg_id);
+	$new_extseqio->write_seq($seqobj);
+    }
+
+    ## 2- The program is going to create different files in the current 
+    ##    directory with the basename: index_k*. The script will create 
+    ##    a internal directory and move the files there
+
+    my $tempdir = dmd_mkdir($dir, "Mapsembler_temp");
+    print STDERR "\n\tMoved $expected_out file to $tempdir dir\n";
+    move($expected_out, $tempdir);
+
+    opendir(my $curr_dir_fh,  $ENV{'PWD'});
+    while(readdir($curr_dir_fh)) {
+    
+	if ($_ =~ m/^index_k_\d+_c_\d+/) {
+        
+	    my $filename= File::Spec->catfile($ENV{'PWD'}, $_);
+	    move($filename, $tempdir);
+	    print STDERR "\tMoved $filename file to $tempdir dir\n";
+        }
+    }
 
     return($mapbleroutfile);
 }
