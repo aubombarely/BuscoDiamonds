@@ -31,6 +31,7 @@
 
   Prerrequisites
   ==============
+   * Perl module: IPC::Cmd
    * Bioperl
    * Diamond accessible from the path or as the env. variable DIAMOND_PATH
    * Seqtk accessible from the path or as the env. variable SEQTK_PATH
