@@ -452,8 +452,7 @@ foreach my $fqfile (split(/,/, $opt_i)) {
     } 
     else {
 
-	#my $count_at = `seqtk seq -A $fqfile | grep -c "^>"`;
-	my $count_at = 0;
+	my $count_at = `seqtk seq -A $fqfile | grep -c "^>"`;
 	chomp($count_at); 
 	$total_input_reads += $count_at;
 
@@ -2841,7 +2840,7 @@ sub run_mapsembler {
     my $old_extseqio = Bio::SeqIO->new( -file   => $expected_out,
 					-format => 'Fasta');
 
-    my $new_extseqio = Bio::SeqIO->new( -file   => "$mapbleroutfile",
+    my $new_extseqio = Bio::SeqIO->new( -file   => ">$mapbleroutfile",
 					-format => 'Fasta');
 
     my $ctg_n = 0;
