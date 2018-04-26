@@ -427,6 +427,13 @@ print_header("0) Checking arguments");
 my $fastaref = $opt_r || 
     die("\nINPUT ARG. ERROR: -r <reference> argument was not supplied.\n\n");
 
+## Check that the file exists
+
+unless (-e $fastaref) {
+
+    die("ERROR: -r $fastaref file does not exists. Please check.\n");
+}
+
 print STDERR "\tPEP_REFSET file: $fastaref\n";
 
 ## Count how many sequences has the fasta file
