@@ -1065,6 +1065,11 @@ else {
     print STDERR "\n\tFinal Minia assembly has been performed\n";
 }
 
+## Finally it will move the files from mapsembler to the assembly
+## directory
+
+move_mapsembler_files($d05dir);
+
 
 ###############################################################################
 ## STRUCTURAL ANNOTATION
@@ -2852,13 +2857,28 @@ sub run_mapsembler {
 	$new_extseqio->write_seq($seqobj);
     }
 
-    ## 2- The program is going to create different files in the current 
-    ##    directory with the basename: index_k*. The script will create 
-    ##    a internal directory and move the files there
+    ## Move the file to dir
+
+    print STDERR "\n\tMoved $expected_out file to $dir dir\n";
+    move($expected_out, $dir);
+
+    return($mapbleroutfile);
+}
+
+
+
+
+###############################################################################
+## move_mapsembler_files($dir)
+## function to move the mapsembler files inside the BuscoDiamond directory
+##
+###############################################################################
+
+sub move_mapsembler_files {
+
+    my $dir = shift();
 
     my $tempdir = dmd_mkdir($dir, "Mapsembler_temp");
-    print STDERR "\n\tMoved $expected_out file to $tempdir dir\n";
-    move($expected_out, $tempdir);
 
     opendir(my $curr_dir_fh,  $ENV{'PWD'});
     while(readdir($curr_dir_fh)) {
@@ -2870,8 +2890,6 @@ sub run_mapsembler {
 	    print STDERR "\tMoved $filename file to $tempdir dir\n";
         }
     }
-
-    return($mapbleroutfile);
 }
 
 
